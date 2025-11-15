@@ -4,3 +4,11 @@ venv
 .env.local
 .env
 devtools
+cached_features_v1.npz
+checkpoints/
+checkpoints-old/
+bot\python\nnue_residual.bin
+bot\python\nnue_residual_rebalanced_preprocessed.bin
+bot\python\simple_nnue.bin
+
+*.npz
