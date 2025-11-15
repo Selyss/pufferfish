@@ -22,10 +22,11 @@ namespace pf
     struct LayerNormF
     {
         int dim = 0;
+        float eps = 1e-5f;
         std::vector<float> gamma; // scale
         std::vector<float> beta;  // bias
-        bool load(std::FILE *f, int dim_);
-        void apply(std::vector<float> &x, float eps = 1e-5f) const;
+        bool load(std::FILE *f, int dim_, float eps_);
+        void apply(std::vector<float> &x) const;
     };
 
     struct ResidualBlockF
@@ -35,11 +36,10 @@ namespace pf
         LayerNormF ln;
     };
 
-    struct StageF
+    struct SeqEntry
     {
-        LinearF base;
-        LayerNormF ln_base;
-        std::vector<ResidualBlockF> blocks; // typically 2
+        int type;
+        int index;
     };
 
     class SimpleNNUEEvaluator : public NNEvaluator
@@ -51,8 +51,11 @@ namespace pf
     private:
         bool loaded_ = false;
         int input_dim_ = 0;
-        std::vector<StageF> stages_; // 5 stages
-        LinearF head_;               // 256 -> 1
+        // Layer storage and execution order
+        std::vector<LinearF> linears_;
+        std::vector<LayerNormF> norms_;
+        std::vector<ResidualBlockF> residuals_;
+        std::vector<SeqEntry> sequence_;
 
         static void relu(std::vector<float> &v);
     };

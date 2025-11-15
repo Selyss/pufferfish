@@ -200,10 +200,11 @@ int main(int argc, char **argv)
     Position pos;
     pos.set_startpos();
 
-    // Parse CLI args: --fen <6 tokens>, --depth N, --movetime ms
+    // Parse CLI args: --fen <6 tokens>, --depth N, --movetime ms, --timeleft ms
     std::string fen;
     int depth = 5;
     int movetime = 0;
+    long long timeleft = 0;
     for (int i = 1; i < argc; ++i)
     {
         std::string a = argv[i];
@@ -223,6 +224,10 @@ int main(int argc, char **argv)
         {
             movetime = std::max(0, std::atoi(argv[++i]));
         }
+        else if (a == "--timeleft" && i + 1 < argc)
+        {
+            timeleft = std::max(0LL, std::atoll(argv[++i]));
+        }
     }
     if (!fen.empty())
     {
@@ -232,48 +237,27 @@ int main(int argc, char **argv)
     TranspositionTable tt;
     tt.resize(64); // 64 MB
 
-    // Prefer SimpleNNUE (795-dim residual MLP) if available; otherwise fall back to legacy NNUE
+    // Load SimpleNNUE residual model (residual-nnue-v1 JSON+records)
     SimpleNNUEEvaluator snn;
-    NNUEEvaluator nn;
     const char *simplePaths[] = {
-        "bot/python/simple_nnue.bin",
-        "../bot/python/simple_nnue.bin",
-        "../../bot/python/simple_nnue.bin",
-        "../../../bot/python/simple_nnue.bin",
+        "bot/python/nnue_residual_rebalanced_preprocessed.bin",
+        "../bot/python/nnue_residual_rebalanced_preprocessed.bin",
+        "../../bot/python/nnue_residual_rebalanced_preprocessed.bin",
+        "../../../bot/python/nnue_residual_rebalanced_preprocessed.bin",
+        // "bot/python/nnue_residual",
+        // "../bot/python/nnue_residual",
+        // "../../bot/python/nnue_residual",
+        // "../../../bot/python/nnue_residual",
     };
-    const char *legacyPaths[] = {
-        // Relative to project root
-        "bot/python/nnue_weights.bin",
-        // Common working dirs: repo root, pufferfish/, pufferfish/build/, pufferfish/build/Release/
-        "../bot/python/nnue_weights.bin",
-        "../../bot/python/nnue_weights.bin",
-        "../../../bot/python/nnue_weights.bin",
-        // Fallback to local cwd
-        "nnue_weights.bin"};
     bool loaded = false;
     const char *loadedPath = nullptr;
-    bool usingSimple = false;
     for (const char *p : simplePaths)
     {
         if (snn.load(p))
         {
             loaded = true;
             loadedPath = p;
-            usingSimple = true;
             break;
-        }
-    }
-    if (!loaded)
-    {
-        for (const char *p : legacyPaths)
-        {
-            if (nn.load(p))
-            {
-                loaded = true;
-                loadedPath = p;
-                usingSimple = false;
-                break;
-            }
         }
     }
     if (!loaded)
@@ -283,13 +267,12 @@ int main(int argc, char **argv)
     }
     else
     {
-        std::cerr << "info nnue_loaded " << loadedPath << (usingSimple ? " simple" : " legacy") << std::endl;
+        std::cerr << "info nnue_loaded " << loadedPath << " simple" << std::endl;
     }
 
     SearchContext ctx;
     ctx.tt = &tt;
-    ctx.nn = usingSimple ? static_cast<NNEvaluator *>(&snn)
-                         : static_cast<NNEvaluator *>(&nn);
+    ctx.nn = static_cast<NNEvaluator *>(&snn);
     if (movetime > 0)
     {
         ctx.limits.time_ms = static_cast<std::uint64_t>(movetime);
@@ -299,6 +282,8 @@ int main(int argc, char **argv)
     {
         ctx.limits.depth = depth;
         ctx.limits.time_ms = 0;
+        if (timeleft > 0)
+            ctx.limits.time_left_ms = static_cast<std::uint64_t>(timeleft);
     }
 
     SearchResult res = search(pos, ctx);

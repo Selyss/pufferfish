@@ -4,6 +4,7 @@
 #include <cstring>
 #include <cmath>
 #include <algorithm>
+#include <string>
 
 namespace pf
 {
@@ -40,9 +41,10 @@ namespace pf
         }
     }
 
-    bool LayerNormF::load(std::FILE *f, int dim_)
+    bool LayerNormF::load(std::FILE *f, int dim_, float eps_)
     {
         dim = dim_;
+        eps = eps_;
         gamma.resize(dim);
         beta.resize(dim);
         if (!fread_exact(f, gamma.data(), dim * sizeof(float)))
@@ -52,7 +54,7 @@ namespace pf
         return true;
     }
 
-    void LayerNormF::apply(std::vector<float> &x, float eps) const
+    void LayerNormF::apply(std::vector<float> &x) const
     {
         float mean = 0.0f;
         for (int i = 0; i < dim; ++i)
@@ -80,88 +82,166 @@ namespace pf
                 x = 0.0f;
     }
 
+    static bool read_u32(std::FILE *f, uint32_t &v) { return fread_exact(f, &v, sizeof(v)); }
+    static bool read_i32(std::FILE *f, int32_t &v) { return fread_exact(f, &v, sizeof(v)); }
+    static bool read_f32(std::FILE *f, float &v) { return fread_exact(f, &v, sizeof(v)); }
+
     bool SimpleNNUEEvaluator::load(const char *path)
     {
         loaded_ = false;
-        stages_.clear();
-        head_ = LinearF{};
+        linears_.clear();
+        norms_.clear();
+        residuals_.clear();
+        sequence_.clear();
 
         std::FILE *f = std::fopen(path, "rb");
         if (!f)
             return false;
-        struct Header
-        {
-            char magic[8];
-            uint32_t version;
-            uint32_t in_dim;
-            uint32_t widths[5];
-            uint32_t res_blocks;
-            uint32_t flags;
-        } h;
-        if (!fread_exact(f, &h, sizeof(h)))
+
+        // JSON metadata header [u32 length][json utf8]
+        uint32_t json_len = 0;
+        if (!read_u32(f, json_len) || json_len == 0 || json_len > (32u << 20))
         {
             std::fclose(f);
             return false;
         }
-        if (std::memcmp(h.magic, "SNNUEV1", 7) != 0 || h.version != 1)
+        std::string json(json_len, '\0');
+        if (!fread_exact(f, json.data(), json_len))
         {
             std::fclose(f);
             return false;
         }
-        input_dim_ = (int)h.in_dim;
-        int widths[5];
-        for (int i = 0; i < 5; ++i)
-            widths[i] = (int)h.widths[i];
-        int R = (int)h.res_blocks;
-        // Expect spec dims
-        if (input_dim_ != 795 || widths[0] != 2048 || widths[1] != 2048 || widths[2] != 1024 || widths[3] != 512 || widths[4] != 256)
+        auto find_val = [&](const char *key) -> std::string
+        {
+            size_t kpos = json.find(key);
+            if (kpos == std::string::npos)
+                return {};
+            size_t colon = json.find(':', kpos);
+            if (colon == std::string::npos)
+                return {};
+            size_t start = colon + 1;
+            while (start < json.size() && (json[start] == ' ' || json[start] == '"'))
+                ++start;
+            size_t end = start;
+            while (end < json.size() && json[end] != ',' && json[end] != '}' && json[end] != '"')
+                ++end;
+            return json.substr(start, end - start);
+        };
+        std::string fmt = find_val("format");
+        if (fmt != "residual-nnue-v1")
         {
             std::fclose(f);
             return false;
         }
-        stages_.resize(5);
-        int prev = input_dim_;
-        for (int s = 0; s < 5; ++s)
+        std::string in_s = find_val("input_dim");
+        std::string lc_s = find_val("layer_count");
+        if (in_s.empty() || lc_s.empty())
         {
-            int cur = widths[s];
-            StageF st;
-            if (!st.base.load(f, prev, cur))
+            std::fclose(f);
+            return false;
+        }
+        input_dim_ = std::stoi(in_s);
+        int layer_count = std::stoi(lc_s);
+
+        for (int li = 0; li < layer_count; ++li)
+        {
+            int32_t type_id = 0;
+            if (!read_i32(f, type_id))
             {
                 std::fclose(f);
                 return false;
             }
-            if (!st.ln_base.load(f, cur))
+            if (type_id == 1)
+            {
+                int32_t inD = 0, outD = 0;
+                if (!read_i32(f, inD) || !read_i32(f, outD))
+                {
+                    std::fclose(f);
+                    return false;
+                }
+                LinearF L;
+                if (!L.load(f, inD, outD))
+                {
+                    std::fclose(f);
+                    return false;
+                }
+                int idx = (int)linears_.size();
+                linears_.push_back(std::move(L));
+                sequence_.push_back({1, idx});
+            }
+            else if (type_id == 2)
+            {
+                int32_t dim = 0;
+                float eps = 1e-5f;
+                if (!read_i32(f, dim) || !read_f32(f, eps))
+                {
+                    std::fclose(f);
+                    return false;
+                }
+                LayerNormF LN;
+                if (!LN.load(f, dim, eps))
+                {
+                    std::fclose(f);
+                    return false;
+                }
+                int idx = (int)norms_.size();
+                norms_.push_back(std::move(LN));
+                sequence_.push_back({2, idx});
+            }
+            else if (type_id == 3)
+            {
+                int32_t dim = 0;
+                if (!read_i32(f, dim))
+                {
+                    std::fclose(f);
+                    return false;
+                }
+                ResidualBlockF RB;
+                int32_t in1 = 0, out1 = 0;
+                if (!read_i32(f, in1) || !read_i32(f, out1))
+                {
+                    std::fclose(f);
+                    return false;
+                }
+                if (!RB.l1.load(f, in1, out1))
+                {
+                    std::fclose(f);
+                    return false;
+                }
+                int32_t in2 = 0, out2 = 0;
+                if (!read_i32(f, in2) || !read_i32(f, out2))
+                {
+                    std::fclose(f);
+                    return false;
+                }
+                if (!RB.l2.load(f, in2, out2))
+                {
+                    std::fclose(f);
+                    return false;
+                }
+                int32_t lnd = 0;
+                float ln_eps = 1e-5f;
+                if (!read_i32(f, lnd) || !read_f32(f, ln_eps))
+                {
+                    std::fclose(f);
+                    return false;
+                }
+                if (!RB.ln.load(f, lnd, ln_eps))
+                {
+                    std::fclose(f);
+                    return false;
+                }
+                int idx = (int)residuals_.size();
+                residuals_.push_back(std::move(RB));
+                sequence_.push_back({3, idx});
+            }
+            else
             {
                 std::fclose(f);
                 return false;
             }
-            st.blocks.resize(R);
-            for (int r = 0; r < R; ++r)
-            {
-                if (!st.blocks[r].l1.load(f, cur, cur))
-                {
-                    std::fclose(f);
-                    return false;
-                }
-                if (!st.blocks[r].l2.load(f, cur, cur))
-                {
-                    std::fclose(f);
-                    return false;
-                }
-                if (!st.blocks[r].ln.load(f, cur))
-                {
-                    std::fclose(f);
-                    return false;
-                }
-            }
-            stages_[s] = std::move(st);
-            prev = cur;
         }
-        if (!head_.load(f, widths[4], 1))
-        {
-            std::fclose(f);
-            return false;
-        }
+
         std::fclose(f);
         loaded_ = true;
         return true;
@@ -172,36 +252,51 @@ namespace pf
         if (!loaded_)
             return 0;
         std::vector<float> x;
-        x.reserve(795);
-        extract_features_795(pos, x);
+        if (input_dim_ == 795)
+        {
+            x.reserve(795);
+            extract_features_795(pos, x);
+        }
+        else
+        {
+            return 0;
+        }
         std::vector<float> h, tmp;
 
-        // 5 stages: (Linear->ReLU->LN; + 2x residual blocks each)
-        for (size_t s = 0; s < stages_.size(); ++s)
+        for (size_t i = 0; i < sequence_.size(); ++i)
         {
-            stages_[s].base.forward(x, h);
-            relu(h);
-            stages_[s].ln_base.apply(h);
-            for (const auto &rb : stages_[s].blocks)
+            const auto &se = sequence_[i];
+            if (se.type == 1)
             {
-                rb.l1.forward(h, tmp);
-                relu(tmp);
-                rb.l2.forward(tmp, tmp);
-                // skip add
-                for (size_t i = 0; i < h.size(); ++i)
-                    tmp[i] += h[i];
-                // ln
-                rb.ln.apply(tmp);
-                h.swap(tmp);
+                const LinearF &L = linears_[se.index];
+                L.forward(x, h);
+                if (i + 1 < sequence_.size() && sequence_[i + 1].type == 2)
+                    relu(h);
+                x.swap(h);
             }
-            x.swap(h);
+            else if (se.type == 2)
+            {
+                const LayerNormF &LN = norms_[se.index];
+                LN.apply(x);
+            }
+            else if (se.type == 3)
+            {
+                const ResidualBlockF &RB = residuals_[se.index];
+                RB.l1.forward(x, h);
+                relu(h);
+                RB.l2.forward(h, h);
+                if (h.size() != x.size())
+                    return 0;
+                for (size_t k = 0; k < h.size(); ++k)
+                    h[k] += x[k];
+                tmp = h;
+                RB.ln.apply(tmp);
+                x.swap(tmp);
+            }
         }
 
-        // Head 256->1
-        head_.forward(x, h);
-        float out = h[0];
-        // Convert pawn units to centipawns (assume model output ~ pawns)
-        int cp = (int)std::round(out * 100.0f);
+        float out = (x.empty() ? 0.0f : x[0]);
+        int cp = (int)std::lround(out * 100.0f);
         return cp;
     }
 
