@@ -14,20 +14,7 @@
 
 using namespace pf;
 
-struct MaterialEvaluator : NNEvaluator
-{
-    int evaluate(const Position &pos) override
-    {
-        static const int val[PIECE_NB] = {
-            0,
-            100, 320, 330, 500, 900, 0,
-            -100, -320, -330, -500, -900, 0};
-        int score = 0;
-        for (int sq = 0; sq < 64; ++sq)
-            score += val[pos.board[sq]];
-        return (pos.side_to_move == WHITE ? score : -score);
-    }
-};
+// Material fallback removed: NNUE is required.
 
 static std::string sq_to_str(int sq)
 {
@@ -60,6 +47,20 @@ static char promo_char_from_piece(int promoPiece)
     default:
         return '\0';
     }
+}
+
+static std::string move_to_uci(Move m)
+{
+    int from = from_sq(m);
+    int to = to_sq(m);
+    std::string uci = sq_to_str(from) + sq_to_str(to);
+    if (move_flags(m) & FLAG_PROMOTION)
+    {
+        char pc = promo_char_from_piece(promo_piece(m));
+        if (pc)
+            uci += pc;
+    }
+    return uci;
 }
 
 static char piece_letter(Piece p)
@@ -231,12 +232,15 @@ int main(int argc, char **argv)
     tt.resize(64); // 64 MB
 
     NNUEEvaluator nn;
-    bool has_nn = nn.load("nnue_weights.bin");
-    MaterialEvaluator mat;
+    if (!nn.load("nnue_weights.bin"))
+    {
+        std::cerr << "error nnue_load_failed" << std::endl;
+        return 2;
+    }
 
     SearchContext ctx;
     ctx.tt = &tt;
-    ctx.nn = has_nn ? static_cast<NNEvaluator *>(&nn) : static_cast<NNEvaluator *>(&mat);
+    ctx.nn = static_cast<NNEvaluator *>(&nn);
     if (movetime > 0)
     {
         ctx.limits.time_ms = static_cast<std::uint64_t>(movetime);
@@ -250,8 +254,7 @@ int main(int argc, char **argv)
 
     SearchResult res = search(pos, ctx);
 
-    std::string san = move_to_san(pos, res.bestMove);
-    std::cout << "bestmove " << san << "\n";
+    std::cout << "bestmove " << move_to_uci(res.bestMove) << "\n";
 
     return 0;
 }

@@ -1,6 +1,5 @@
 from .utils import chess_manager, GameContext
 from chess import Move
-import random
 import time
 import os
 import subprocess
@@ -29,7 +28,9 @@ def test_func(ctx: GameContext):
         exe = find_engine()
         if not exe:
             return None
-        cmd = [exe, '--fen', fen, '--movetime', str(movetime_ms)]
+        # Pass FEN as six separate CLI tokens expected by the C++ program
+        fen_tokens = fen.split()
+        cmd = [exe, '--fen', *fen_tokens, '--movetime', str(movetime_ms)]
         try:
             out = subprocess.run(
                 cmd,
@@ -45,32 +46,23 @@ def test_func(ctx: GameContext):
         for line in out.stdout.splitlines():
             parts = line.strip().split(maxsplit=1)
             if len(parts) == 2 and parts[0].lower() == 'bestmove':
-                # Engine now returns SAN only after the keyword
+                # Engine now returns UCI only after the keyword
                 return parts[1]
         return None
 
     fen = ctx.board.fen()
-    best_san = call_engine(fen, movetime_ms=200)
-    if best_san:
+    best_uci = call_engine(fen, movetime_ms=200)
+    if best_uci:
         try:
-            mv = ctx.board.parse_san(best_san)
+            mv = Move.from_uci(best_uci)
             if mv in ctx.board.legal_moves:
-                ctx.logProbabilities({mv: 1.0})
                 return mv
         except Exception:
             pass
 
-    # Fallback: random move
-    legal_moves = list(ctx.board.generate_legal_moves())
-    if not legal_moves:
-        ctx.logProbabilities( {})
-        raise ValueError("No legal moves available (i probably lost didn't i)")
-
-    move_weights = [random.random() for _ in legal_moves]
-    total_weight = sum(move_weights)
-    move_probs = {move: w / total_weight for move, w in zip(legal_moves, move_weights)}
-    ctx.logProbabilities(move_probs)
-    return random.choices(legal_moves, weights=move_weights, k=1)[0]
+    # No fallback: fail fast if engine didn't return a valid move
+    # TODO: just give a valid move instead of erroring out, later
+    raise ValueError("Engine did not return a valid move")
 
 
 @chess_manager.reset
