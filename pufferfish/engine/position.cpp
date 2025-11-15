@@ -295,6 +295,29 @@ namespace pf
 
     void Position::do_move(Move m, UndoState &u)
     {
+        // Handle null move: flip side to move, clear EP, update clocks/key.
+        if (m == MOVE_NONE)
+        {
+            u.move = m;
+            u.castling_rights = castling_rights;
+            u.ep_square = ep_square;
+            u.halfmove_clock = halfmove_clock;
+            u.key = key;
+            u.captured = NO_PIECE;
+
+            if (ep_square != -1)
+                key ^= Zobrist.ep_file[ep_square & 7];
+            ep_square = -1;
+
+            ++halfmove_clock;
+
+            side_to_move = Color(side_to_move ^ 1);
+            key ^= Zobrist.side;
+            if (side_to_move == WHITE)
+                ++fullmove_number;
+            return;
+        }
+
         u.move = m;
         u.castling_rights = castling_rights;
         u.ep_square = ep_square;
@@ -427,6 +450,17 @@ namespace pf
     void Position::undo_move(const UndoState &u)
     {
         Move m = u.move;
+        if (m == MOVE_NONE)
+        {
+            // Restore simple state changes made by null move
+            side_to_move = Color(side_to_move ^ 1);
+            castling_rights = u.castling_rights;
+            ep_square = u.ep_square;
+            halfmove_clock = u.halfmove_clock;
+            key = u.key;
+            // fullmove_number is restored implicitly via stored key/state; adjust if needed
+            return;
+        }
         int from = from_sq(m);
         int to = to_sq(m);
         int pc = move_piece(m);

@@ -9,49 +9,51 @@ import shutil
 # Can do things like load models from huggingface, make connections to subprocesses, etcwenis
 
 
+def find_engine() -> str | None:
+    here = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+    candidates = [
+        os.path.join(here, 'pufferfish', 'build', 'Release', 'pufferfish.exe'),
+        os.path.join(here, 'pufferfish', 'build', 'Debug', 'pufferfish.exe'),
+        os.path.join(here, 'pufferfish', 'pufferfish.exe'),
+    ]
+    for c in candidates:
+        if os.path.isfile(c):
+            return c
+    return shutil.which('pufferfish')
+
+
+def call_engine(fen: str, movetime_ms: int = 1000, timeout_s: float | None = None) -> str | None:
+    exe = find_engine()
+    if not exe:
+        return None
+    # Pass FEN as six separate CLI tokens expected by the C++ program
+    fen_tokens = fen.split()
+    cmd = [exe, '--fen', *fen_tokens, '--movetime', str(movetime_ms)]
+    try:
+        out = subprocess.run(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout_s or max(2.0, movetime_ms / 1000.0 + 1.0),
+        )
+    except Exception:
+        return None
+    if not out.stdout:
+        return None
+    for line in out.stdout.splitlines():
+        parts = line.strip().split(maxsplit=1)
+        if len(parts) == 2 and parts[0].lower() == 'bestmove':
+            # Engine returns UCI after the keyword
+            return parts[1]
+    return None
+
+
 @chess_manager.entrypoint
 def test_func(ctx: GameContext):
     # Try to call the native pufferfish engine with current FEN
-    def find_engine() -> str | None:
-        here = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
-        candidates = [
-            os.path.join(here, 'pufferfish', 'build', 'Release', 'pufferfish.exe'),
-            os.path.join(here, 'pufferfish', 'build', 'Debug', 'pufferfish.exe'),
-            os.path.join(here, 'pufferfish', 'pufferfish.exe'),
-        ]
-        for c in candidates:
-            if os.path.isfile(c):
-                return c
-        return shutil.which('pufferfish')
-
-    def call_engine(fen: str, movetime_ms: int = 200, timeout_s: float | None = None) -> str | None:
-        exe = find_engine()
-        if not exe:
-            return None
-        # Pass FEN as six separate CLI tokens expected by the C++ program
-        fen_tokens = fen.split()
-        cmd = [exe, '--fen', *fen_tokens, '--movetime', str(movetime_ms)]
-        try:
-            out = subprocess.run(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                timeout=timeout_s or max(2.0, movetime_ms / 1000.0 + 1.0),
-            )
-        except Exception:
-            return None
-        if not out.stdout:
-            return None
-        for line in out.stdout.splitlines():
-            parts = line.strip().split(maxsplit=1)
-            if len(parts) == 2 and parts[0].lower() == 'bestmove':
-                # Engine now returns UCI only after the keyword
-                return parts[1]
-        return None
-
     fen = ctx.board.fen()
-    best_uci = call_engine(fen, movetime_ms=200)
+    best_uci = call_engine(fen, movetime_ms=1000)
     if best_uci:
         try:
             mv = Move.from_uci(best_uci)
