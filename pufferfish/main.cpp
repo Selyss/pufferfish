@@ -244,10 +244,6 @@ int main(int argc, char **argv)
         "../bot/python/nnue_residual_rebalanced_preprocessed.bin",
         "../../bot/python/nnue_residual_rebalanced_preprocessed.bin",
         "../../../bot/python/nnue_residual_rebalanced_preprocessed.bin",
-        // "bot/python/nnue_residual",
-        // "../bot/python/nnue_residual",
-        // "../../bot/python/nnue_residual",
-        // "../../../bot/python/nnue_residual",
     };
     bool loaded = false;
     const char *loadedPath = nullptr;

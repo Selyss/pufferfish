@@ -291,6 +291,7 @@ namespace pf
                     h[k] += x[k];
                 tmp = h;
                 RB.ln.apply(tmp);
+                relu(tmp);
                 x.swap(tmp);
             }
         }

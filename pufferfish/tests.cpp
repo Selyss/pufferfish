@@ -120,6 +120,14 @@ static void test_search_depth3()
     tt.resize(16);
     SimpleNNUEEvaluator nn;
     const char *weightPaths[] = {
+        "bot/python/simple_nnue.bin",
+        "../bot/python/simple_nnue.bin",
+        "../../bot/python/simple_nnue.bin",
+        "../../../bot/python/simple_nnue.bin",
+        "bot/python/nnue_residual.bin",
+        "../bot/python/nnue_residual.bin",
+        "../../bot/python/nnue_residual.bin",
+        "../../../bot/python/nnue_residual.bin",
         "bot/python/nnue_residual_rebalanced_preprocessed.bin",
         "../bot/python/nnue_residual_rebalanced_preprocessed.bin",
         "../../bot/python/nnue_residual_rebalanced_preprocessed.bin",
