@@ -31,3 +31,35 @@ target_link_libraries(pufferfish PRIVATE pufferfish_engine)
 add_executable(pufferfish_tests tests.cpp)
 target_link_libraries(pufferfish_tests PRIVATE pufferfish_engine)
 
+# Optimize Release builds and enable AVX2/LTCG on MSVC
+if (MSVC)
+	target_compile_options(pufferfish_engine PRIVATE 
+		$<$<CONFIG:Release>:/O2 /Ob2 /Oi /Ot /GL /arch:AVX2>
+	)
+	target_link_options(pufferfish_engine PRIVATE 
+		$<$<CONFIG:Release>:/LTCG>
+	)
+	target_compile_options(pufferfish PRIVATE 
+		$<$<CONFIG:Release>:/O2 /Ob2 /Oi /Ot /GL /arch:AVX2>
+	)
+	target_link_options(pufferfish PRIVATE 
+		$<$<CONFIG:Release>:/LTCG>
+	)
+	target_compile_options(pufferfish_tests PRIVATE 
+		$<$<CONFIG:Release>:/O2 /Ob2 /Oi /Ot /GL /arch:AVX2>
+	)
+	target_link_options(pufferfish_tests PRIVATE 
+		$<$<CONFIG:Release>:/LTCG>
+	)
+else()
+	target_compile_options(pufferfish_engine PRIVATE 
+		$<$<CONFIG:Release>:-O3 -DNDEBUG>
+	)
+	target_compile_options(pufferfish PRIVATE 
+		$<$<CONFIG:Release>:-O3 -DNDEBUG>
+	)
+	target_compile_options(pufferfish_tests PRIVATE 
+		$<$<CONFIG:Release>:-O3 -DNDEBUG>
+	)
+endif()
+
