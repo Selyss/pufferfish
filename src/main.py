@@ -53,7 +53,7 @@ def call_engine(fen: str, movetime_ms: int = 1000, timeout_s: float | None = Non
 def test_func(ctx: GameContext):
     # Try to call the native pufferfish engine with current FEN
     fen = ctx.board.fen()
-    best_uci = call_engine(fen, movetime_ms=200)
+    best_uci = call_engine(fen, movetime_ms=1000)
     if best_uci:
         try:
             mv = Move.from_uci(best_uci)
