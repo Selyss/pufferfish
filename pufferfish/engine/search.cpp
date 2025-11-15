@@ -7,22 +7,6 @@
 
 namespace pf
 {
-    static inline int piece_mvv_value(int piece)
-    {
-        // Use conventional MVV values; indices are pf::Piece enums.
-        static const int v[PIECE_NB] = {
-            0,   // NO_PIECE
-            100, // W_PAWN
-            320, // W_KNIGHT
-            330, // W_BISHOP
-            500, // W_ROOK
-            900, // W_QUEEN
-            20000, // W_KING (avoid preferring captures of king; large for ordering only)
-            100, 320, 330, 500, 900, 20000 // black pieces
-        };
-        if (piece < 0 || piece >= PIECE_NB) return 0;
-        return v[piece];
-    }
 
     static std::uint64_t now_ms()
     {
@@ -56,25 +40,16 @@ namespace pf
                 s += 1000000;
             if (m == prevBest)
                 s += 900000;
-            const std::uint32_t flags = move_flags(m);
-            const bool isCapture = (flags & FLAG_CAPTURE) != 0;
-            const bool isPromotion = (flags & FLAG_PROMOTION) != 0;
-            if (isCapture)
+            if (move_flags(m) & FLAG_CAPTURE)
             {
-                // MVV-LVA with real values
+                // Simple MVV-LVA using piece codes
                 int victim = pos.board[to_sq(m)];
                 int attacker = move_piece(m);
-                s += 200000 + piece_mvv_value(victim) - (piece_mvv_value(attacker) / 10);
-                if (isPromotion)
-                    s += 5000; // promote-capture is even better
+                s += 100000 + (victim * 10 - attacker);
             }
             else
             {
-                if (isPromotion)
-                {
-                    s += 120000; // non-capture promotions are high priority
-                }
-                else if (m == ctx.killers[0][ply])
+                if (m == ctx.killers[0][ply])
                     s += 80000;
                 else if (m == ctx.killers[1][ply])
                     s += 70000;
@@ -109,11 +84,6 @@ namespace pf
 
         for (int depth = 1; depth <= maxDepth; ++depth)
         {
-            // Light history decay each iteration to keep values bounded
-            for (int p = 0; p < PIECE_NB; ++p)
-                for (int sq = 0; sq < 64; ++sq)
-                    ctx.history[p][sq] -= (ctx.history[p][sq] >> 3);
-
             Line pv;
             int window = 20; // aspiration window in cp
             int scoreLo = alpha;
@@ -174,31 +144,46 @@ namespace pf
             return 0;
         ++ctx.stats.qnodes;
 
-        int standPat = ctx.nn->evaluate(pos);
-        if (standPat >= beta)
-            return standPat;
-        if (standPat > alpha)
-            alpha = standPat;
+        const bool inCheck = pos.in_check(pos.side_to_move);
+        int standPat = -INF_SCORE;
+        if (!inCheck)
+        {
+            standPat = ctx.nn->evaluate(pos);
+            if (standPat >= beta)
+                return standPat;
+            if (standPat > alpha)
+                alpha = standPat;
+        }
 
         MoveList moves, ordered;
-        generate_captures(pos, moves);
+        if (inCheck)
+        {
+            generate_moves(pos, moves);
+            filter_legal_moves(pos, moves);
+        }
+        else
+        {
+            generate_captures(pos, moves);
+        }
         if (moves.count == 0)
-            return standPat;
+            return inCheck ? -MATE_SCORE + ply : standPat;
 
         order_moves(pos, ctx, moves, ordered, MOVE_NONE, MOVE_NONE, ply);
 
         for (int i = 0; i < ordered.count; ++i)
         {
             Move m = ordered.moves[i];
-            // Delta pruning: if even capturing the most valuable piece cannot raise alpha, skip.
-            // Here we use a simple constant margin.
-            const int delta = 900; // queen
-            if (standPat + delta < alpha && !(move_flags(m) & FLAG_PROMOTION))
-                continue;
+            if (!inCheck)
+            {
+                // Delta pruning for non-promotion captures.
+                const int delta = 900; // queen
+                if (standPat + delta < alpha && !(move_flags(m) & FLAG_PROMOTION))
+                    continue;
+            }
 
             UndoState u;
             pos.do_move(m, u);
-            if (pos.in_check(Color(pos.side_to_move ^ 1)))
+            if (!inCheck && pos.in_check(Color(pos.side_to_move ^ 1)))
             {
                 pos.undo_move(u);
                 continue;
