@@ -92,3 +92,15 @@ By default, the Next.js app will automatically reload (dismount and remount the 
 Keep in mind that you fully own all of this code! This entire devtool system runs locally, so feel free to modify it however you want. This is just designed as scaffolding to help you get started.
 
 If you need further help, please first check out the [docs](https://docs.chesshacks.dev/). If you still need help, please join our [Discord](https://docs.chesshacks.dev/resources/discord) and ask for help.
+
+## Exporting SimpleNNUE weights for the C++ engine
+
+The C++ `pufferfish` backend consumes a float32 `residual-nnue-v1` binary with the 795-dimension SimpleNNUE architecture (five dense stages with residual refinements). Convert a training checkpoint to this format with:
+
+```bash
+python bot/python/export_residual_nnue.py \
+  --input bot/python/epoch1.pt \
+  --output bot/python/simple_nnue.bin
+```
+
+The exporter reads the `model_config` metadata from the checkpoint, walks through every Linear/LayerNorm/ResidualBlock in order (dropout is ignored at inference time), and writes the JSON header plus per-layer records expected by `pufferfish/engine/simple_nnue.cpp`. After exporting, build/run the C++ engine and it will pick up `bot/python/simple_nnue.bin` automatically (with fallbacks for the previous preprocessed weights).

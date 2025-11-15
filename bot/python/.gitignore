@@ -1,2 +1,5 @@
 nnue_residual.bin
 nnue_residual_rebalanced_preprocessed.bin
+
+nnue_epoch004.pt
+simple_nnue.bin
