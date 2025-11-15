@@ -232,10 +232,30 @@ int main(int argc, char **argv)
     tt.resize(64); // 64 MB
 
     NNUEEvaluator nn;
-    if (!nn.load("nnue_weights.bin"))
+    const char *weightPaths[] = {
+        "bot/python/nnue_weights.bin",
+        "../bot/python/nnue_weights.bin",
+        "../../bot/python/nnue_weights.bin",
+        "nnue_weights.bin"};
+    bool loaded = false;
+    const char *loadedPath = nullptr;
+    for (const char *p : weightPaths)
+    {
+        if (nn.load(p))
+        {
+            loaded = true;
+            loadedPath = p;
+            break;
+        }
+    }
+    if (!loaded)
     {
         std::cerr << "error nnue_load_failed" << std::endl;
         return 2;
+    }
+    else
+    {
+        std::cerr << "info nnue_loaded " << loadedPath << std::endl;
     }
 
     SearchContext ctx;
@@ -254,7 +274,10 @@ int main(int argc, char **argv)
 
     SearchResult res = search(pos, ctx);
 
-    std::cout << "bestmove " << move_to_uci(res.bestMove) << "\n";
+    if (res.bestMove == MOVE_NONE)
+        std::cout << "bestmove 0000\n";
+    else
+        std::cout << "bestmove " << move_to_uci(res.bestMove) << "\n";
 
     return 0;
 }
