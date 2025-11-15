@@ -199,12 +199,12 @@ int main(int argc, char **argv)
     Position pos;
     pos.set_startpos();
 
-    // Parse CLI args: --fen <6 tokens>, --depth N, --movetime ms, --perft N, --tt MB|--hash MB, --no-tt, --no-qsearch
+    // Parse CLI args: --fen <6 tokens>, --depth N, --movetime ms, --tt MB|--hash MB, --no-tt, --no-qsearch
     std::string fen;
     int depth = 5;
     int movetime = 0;
     int ttMB = 64; // default TT size in megabytes
-    int perftDepth = 0;
+    // int perftDepth = 0; // disabled
     bool flag_no_tt = false;
     bool flag_no_qsearch = false;
     for (int i = 1; i < argc; ++i)
@@ -230,10 +230,10 @@ int main(int argc, char **argv)
         {
             ttMB = std::max(1, std::atoi(argv[++i]));
         }
-        else if (a == "--perft" && i + 1 < argc)
-        {
-            perftDepth = std::max(0, std::atoi(argv[++i]));
-        }
+        // else if (a == "--perft" && i + 1 < argc)
+        // {
+        //     perftDepth = std::max(0, std::atoi(argv[++i]));
+        // }
         else if (a == "--no-tt")
         {
             flag_no_tt = true;
@@ -280,31 +280,31 @@ int main(int argc, char **argv)
         std::cerr << "info nnue_loaded " << loadedPath << std::endl;
     }
 
-    // Optional perft mode: count leaf nodes only; print and exit
-    auto perft = [&](Position &p, int d) -> std::uint64_t
-    {
-        if (d == 0)
-            return 1ull;
-        MoveList moves;
-        generate_moves(p, moves);
-        filter_legal_moves(p, moves);
-        std::uint64_t nodes = 0ull;
-        for (int i = 0; i < moves.count; ++i)
-        {
-            UndoState u;
-            p.do_move(moves.moves[i], u);
-            nodes += perft(p, d - 1);
-            p.undo_move(u);
-        }
-        return nodes;
-    };
+    // // Optional perft mode: count leaf nodes only; print and exit
+    // auto perft = [&](Position &p, int d) -> std::uint64_t
+    // {
+    //     if (d == 0)
+    //         return 1ull;
+    //     MoveList moves;
+    //     generate_moves(p, moves);
+    //     filter_legal_moves(p, moves);
+    //     std::uint64_t nodes = 0ull;
+    //     for (int i = 0; i < moves.count; ++i)
+    //     {
+    //         UndoState u;
+    //         p.do_move(moves.moves[i], u);
+    //         nodes += perft(p, d - 1);
+    //         p.undo_move(u);
+    //     }
+    //     return nodes;
+    // };
 
-    if (perftDepth > 0)
-    {
-        std::uint64_t nodes = perft(pos, perftDepth);
-        std::cout << nodes << "\n";
-        return 0;
-    }
+    // if (perftDepth > 0)
+    // {
+    //     std::uint64_t nodes = perft(pos, perftDepth);
+    //     std::cout << nodes << "\n";
+    //     return 0;
+    // }
 
     SearchContext ctx;
     ctx.tt = flag_no_tt ? nullptr : &tt;
