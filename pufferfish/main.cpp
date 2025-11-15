@@ -258,7 +258,14 @@ int main(int argc, char **argv)
     NNUEEvaluator nn;
     const char *weightPaths[] = {
         // Common working dirs: repo root, pufferfish/, pufferfish/build/, pufferfish/build/Release/
-        "../../bot/python/nnue_weights.bin"};
+        // Relative to project root
+        "bot/python/nnue_weightsold.bin",
+        // Common working dirs: repo root, pufferfish/, pufferfish/build/, pufferfish/build/Release/
+        "../bot/python/nnue_weightsold.bin",
+        "../../bot/python/nnue_weightsold.bin",
+        "../../../bot/python/nnue_weightsold.bin",
+        // Fallback to local cwd
+        "nnue_weights.bin"};
     bool loaded = false;
     const char *loadedPath = nullptr;
     for (const char *p : weightPaths)
