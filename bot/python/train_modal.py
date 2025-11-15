@@ -27,13 +27,106 @@ volume = modal.Volume.from_name("pufferfish-models", create_if_missing=True)
 
 @app.function(
     image=image,
+    timeout=60 * 60 * 3,
+    volumes={"/models": volume},
+    cpu=8.0,
+)
+def preprocess_features():
+    """
+    Preprocess all FEN strings to feature tensors once.
+    This eliminates the CPU bottleneck during training.
+    
+    Run with: modal run train_modal.py::preprocess_features
+    """
+    import torch
+    import chess
+    import numpy as np
+    from datasets import load_dataset
+    import os
+    
+    def fen_to_features_batch(fens):
+        """Batch process FEN strings to features."""
+        features_list = []
+        for fen in fens:
+            board = chess.Board(fen)
+            features = torch.zeros(768, dtype=torch.float32)
+            
+            piece_to_idx = {
+                chess.PAWN: 0,
+                chess.KNIGHT: 1,
+                chess.BISHOP: 2,
+                chess.ROOK: 3,
+                chess.QUEEN: 4,
+                chess.KING: 5,
+            }
+            
+            for square in chess.SQUARES:
+                piece = board.piece_at(square)
+                if piece is not None:
+                    piece_offset = piece_to_idx[piece.piece_type]
+                    if piece.color == chess.BLACK:
+                        piece_offset += 6
+                    feature_idx = square * 12 + piece_offset
+                    features[feature_idx] = 1.0
+            
+            features_list.append(features.numpy())
+        
+        return np.array(features_list, dtype=np.float32)
+    
+    print("Loading dataset from Hugging Face...")
+    dataset = load_dataset("LegendaryAKx3/preprocessed-balanced", split="train")
+    
+    print(f"Preprocessing {len(dataset):,} FEN strings to features...")
+    print("This will take 30-60 minutes but only needs to be done once.")
+    
+    all_features = []
+    all_targets = []
+    
+    batch_size = 10000
+    for i in range(0, len(dataset), batch_size):
+        end_idx = min(i + batch_size, len(dataset))
+        batch = dataset.select(range(i, end_idx))
+        
+        fens = [sample['fen'] for sample in batch]
+        targets = [sample['cp_label'] for sample in batch]
+        
+        batch_features = fen_to_features_batch(fens)
+        all_features.append(batch_features)
+        all_targets.extend(targets)
+        
+        if (i // batch_size + 1) % 100 == 0:
+            print(f"  Processed {end_idx:,}/{len(dataset):,} samples ({100*end_idx/len(dataset):.1f}%)")
+    
+    print("Concatenating arrays...")
+    all_features = np.concatenate(all_features, axis=0)
+    all_targets = np.array(all_targets, dtype=np.float32)
+    
+    cache_path = "/models/cached_features_v1.npz"
+    print(f"Saving preprocessed features to {cache_path}...")
+    
+    os.makedirs("/models", exist_ok=True)
+    np.savez_compressed(cache_path, features=all_features, targets=all_targets)
+    
+    volume.commit()
+    
+    file_size_mb = os.path.getsize(cache_path) / (1024 * 1024)
+    print(f"Preprocessing complete!")
+    print(f"  Samples: {len(all_features):,}")
+    print(f"  File size: {file_size_mb:.1f} MB")
+    print(f"  Location: {cache_path}")
+    
+    return {"samples": len(all_features), "file_size_mb": file_size_mb}
+
+
+@app.function(
+    image=image,
     gpu=modal.gpu.A100(count=1),  # Single A100 GPU
     timeout=60 * 60 * 4,  # 4 hour timeout
     volumes={"/models": volume},
 )
 def train_on_modal(
     num_epochs: int = 10,
-    batch_size: int = 1024,
+    batch_size: int = 8192,  # Increased default for A100
     lr: float = 1e-3,
     max_samples: int = None,
 ):
@@ -175,36 +268,70 @@ def train_on_modal(
     # Dataset version identifier
     DATASET_VERSION = "preprocessed-balanced-v1"
     
-    # Load and split dataset
-    print("Loading dataset from Hugging Face...")
-    full_dataset = load_dataset("LegendaryAKx3/preprocessed-balanced", split="train")
-    train_data, val_data = create_stratified_split(
-        full_dataset,
-        val_ratio=0.05,
-        max_samples=max_samples
+    # Load preprocessed features from cache
+    print("Loading cached features...")
+    import numpy as np
+    import pandas as pd
+    from sklearn.model_selection import train_test_split
+    from torch.utils.data import TensorDataset
+    
+    cache_path = "/models/cached_features_v1.npz"
+    
+    if not os.path.exists(cache_path):
+        raise FileNotFoundError(
+            f"Cached features not found at {cache_path}. "
+            "Please run: modal run train_modal.py::preprocess_features"
+        )
+    
+    data = np.load(cache_path)
+    features = torch.from_numpy(data['features']).float()
+    targets = torch.from_numpy(data['targets']).float()
+    
+    print(f"Loaded {len(features)} preprocessed samples")
+    
+    # Apply max_samples limit if specified
+    if max_samples is not None and max_samples < len(features):
+        indices = torch.randperm(len(features))[:max_samples]
+        features = features[indices]
+        targets = targets[indices]
+        print(f"Subsampled to {max_samples} samples")
+    
+    # Create stratified split
+    # Bin targets for stratification
+    n_bins = 100
+    target_bins = pd.qcut(targets.numpy(), q=n_bins, labels=False, duplicates='drop')
+    
+    train_idx, val_idx = train_test_split(
+        np.arange(len(features)),
+        test_size=0.05,
+        stratify=target_bins,
+        random_state=42
     )
     
-    # Create datasets and loaders
-    train_dataset = ChessDataset(train_data)
-    val_dataset = ChessDataset(val_data)
+    # Create tensor datasets
+    train_dataset = TensorDataset(features[train_idx], targets[train_idx])
+    val_dataset = TensorDataset(features[val_idx], targets[val_idx])
     
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=4,
         pin_memory=True,
+        persistent_workers=False,
+        prefetch_factor=None,
     )
     val_loader = DataLoader(
         val_dataset,
-        batch_size=batch_size,
+        batch_size=batch_size * 2,  # Double batch size for validation (no gradients)
         shuffle=False,
-        num_workers=4,
         pin_memory=True,
+        persistent_workers=False,
+        prefetch_factor=None,
     )
     
     criterion = nn.MSELoss()
-    optimizer = optim.Adam(model.parameters(), lr=lr)
+    # Use fused Adam for better performance on CUDA
+    optimizer = optim.Adam(model.parameters(), lr=lr, fused=True)
     
     # Add learning rate scheduler - using validation loss
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -225,6 +352,11 @@ def train_on_modal(
     start_epoch = 0
     best_loss = float('inf')
     
+    # Use automatic mixed precision (AMP) for faster training
+    from torch.cuda.amp import autocast, GradScaler
+    scaler = GradScaler()
+    use_amp = True
+    
     if os.path.exists(checkpoint_path):
         print(f"Found checkpoint at {checkpoint_path}, resuming training...")
         checkpoint = torch.load(checkpoint_path, map_location=device)
@@ -241,11 +373,29 @@ def train_on_modal(
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             if 'scheduler_state_dict' in checkpoint:
                 scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            if 'scaler_state_dict' in checkpoint:
+                scaler.load_state_dict(checkpoint['scaler_state_dict'])
             start_epoch = checkpoint['epoch'] + 1
             best_loss = checkpoint.get('best_loss', float('inf'))
             print(f"Resuming from epoch {start_epoch}, best loss: {best_loss:.4f}")
     else:
         print("No checkpoint found, starting training from scratch")
+    
+    # Enable TF32 for faster matmul on Ampere GPUs (A100)
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    
+    # Enable cudnn benchmarking for faster conv operations
+    torch.backends.cudnn.benchmark = True
+    
+    # Use torch.compile for JIT optimization (PyTorch 2.0+)
+    try:
+        model = torch.compile(model, mode='max-autotune')
+        print("Model compiled with torch.compile for maximum performance")
+    except Exception as e:
+        print(f"Could not compile model: {e}")
+    
+    print(f"Using Automatic Mixed Precision (AMP): {use_amp}")
     
     # Training loop
     for epoch in range(start_epoch, num_epochs):
@@ -255,8 +405,8 @@ def train_on_modal(
         grad_norms = []
         
         for batch_idx, (features, targets) in enumerate(train_loader):
-            features = features.to(device)
-            targets = targets.to(device).view(-1)
+            features = features.to(device, non_blocking=True)
+            targets = targets.to(device, non_blocking=True).view(-1)
             
             # Diagnostic on first batch of first epoch
             if epoch == start_epoch and batch_idx == 0:
@@ -265,16 +415,24 @@ def train_on_modal(
                 print(f"  Targets range: [{targets.min().item():.2f}, {targets.max().item():.2f}]")
                 print(f"  Targets mean: {targets.mean().item():.2f}, std: {targets.std().item():.2f}")
             
-            optimizer.zero_grad()
-            outputs = model(features).squeeze()
-            loss = criterion(outputs, targets)
-            loss.backward()
+            optimizer.zero_grad(set_to_none=True)  # More efficient than zero_grad()
             
-            # Gradient clipping to prevent exploding gradients
+            # Use automatic mixed precision
+            with autocast():
+                outputs = model(features).squeeze()
+                loss = criterion(outputs, targets)
+            
+            # Scale loss and backward pass
+            scaler.scale(loss).backward()
+            
+            # Gradient clipping with scaler
+            scaler.unscale_(optimizer)
             grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             grad_norms.append(grad_norm.item())
             
-            optimizer.step()
+            # Optimizer step with scaler
+            scaler.step(optimizer)
+            scaler.update()
             
             epoch_loss += loss.item()
             num_batches += 1
@@ -296,11 +454,12 @@ def train_on_modal(
         
         with torch.no_grad():
             for features, targets in val_loader:
-                features = features.to(device)
-                targets = targets.to(device).view(-1)
+                features = features.to(device, non_blocking=True)
+                targets = targets.to(device, non_blocking=True).view(-1)
                 
-                outputs = model(features).squeeze()
-                loss = criterion(outputs, targets)
+                with autocast():
+                    outputs = model(features).squeeze()
+                    loss = criterion(outputs, targets)
                 
                 val_loss += loss.item()
                 val_batches += 1
@@ -317,32 +476,36 @@ def train_on_modal(
         if avg_val_loss > avg_loss * 1.5:
             print(f"  Warning: Possible overfitting detected (val_loss / train_loss = {avg_val_loss / avg_loss:.2f})")
         
-        # Check for dead neurons
-        with torch.no_grad():
-            sample_features = next(iter(train_loader))[0].to(device)
-            acc_f = model.acc_friendly(sample_features)
-            acc_e = model.acc_enemy(sample_features)
-            dead_acc_f = (acc_f.max(dim=0)[0] == 0).sum().item()
-            dead_acc_e = (acc_e.max(dim=0)[0] == 0).sum().item()
-            if dead_acc_f > 0 or dead_acc_e > 0:
-                print(f"  Warning: {dead_acc_f} dead friendly neurons, {dead_acc_e} dead enemy neurons")
+        # Check for dead neurons every 5 epochs (expensive operation)
+        if (epoch + 1) % 5 == 0:
+            with torch.no_grad():
+                sample_features = next(iter(train_loader))[0].to(device, non_blocking=True)
+                with autocast():
+                    acc_f = model.acc_friendly(sample_features)
+                    acc_e = model.acc_enemy(sample_features)
+                dead_acc_f = (acc_f.max(dim=0)[0] == 0).sum().item()
+                dead_acc_e = (acc_e.max(dim=0)[0] == 0).sum().item()
+                if dead_acc_f > 0 or dead_acc_e > 0:
+                    print(f"  Warning: {dead_acc_f} dead friendly neurons, {dead_acc_e} dead enemy neurons")
         
         # Update learning rate scheduler based on validation loss
         scheduler.step(avg_val_loss)
         
-        # Save checkpoint after each epoch
-        checkpoint = {
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'scheduler_state_dict': scheduler.state_dict(),
-            'train_loss': avg_loss,
-            'val_loss': avg_val_loss,
-            'best_loss': best_loss,
-            'dataset_version': DATASET_VERSION,
-        }
-        torch.save(checkpoint, checkpoint_path)
-        print(f"  Checkpoint saved: epoch {epoch + 1}")
+        # Save checkpoint every 5 epochs (reduce I/O overhead)
+        if (epoch + 1) % 5 == 0 or (epoch + 1) == num_epochs:
+            checkpoint = {
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'train_loss': avg_loss,
+                'val_loss': avg_val_loss,
+                'best_loss': best_loss,
+                'dataset_version': DATASET_VERSION,
+                'scaler_state_dict': scaler.state_dict(),
+            }
+            torch.save(checkpoint, checkpoint_path)
+            print(f"  Checkpoint saved: epoch {epoch + 1}")
         
         # Save best model based on validation loss
         if avg_val_loss < best_loss:
@@ -351,8 +514,10 @@ def train_on_modal(
             torch.save(model.state_dict(), best_model_path)
             print(f"  New best model saved with validation loss: {best_loss:.4f}")
         
-        # Commit volume after each epoch to persist checkpoints
-        volume.commit()
+        # Commit volume every 10 epochs (reduce I/O overhead)
+        if (epoch + 1) % 10 == 0 or (epoch + 1) == num_epochs:
+            volume.commit()
+            print(f"  Volume committed at epoch {epoch + 1}")
     
     # Save final model to volume
     model_path = "/models/nnue_state_dict.pt"

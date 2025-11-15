@@ -19,7 +19,7 @@ def export_quantized(pt_path: str, bin_path: str):
     Export a trained PyTorch model to quantized int16 binary format.
     
     Args:
-        pt_path: Path to the .pt file (e.g., 'nnue_state_dict.pt')
+        pt_path: Path to the .pt file (e.g., 'nnue_state_dict.pt' or checkpoint file)
         bin_path: Output path for the binary file (e.g., 'nnue_weights.bin')
     """
     import os
@@ -30,7 +30,18 @@ def export_quantized(pt_path: str, bin_path: str):
     print(f"Loading model from {pt_path}...")
     model = NNUEModel()
     state = torch.load(pt_path, map_location="cpu", weights_only=True)
-    model.load_state_dict(state)
+    
+    # Handle both checkpoint format and direct state_dict format
+    if isinstance(state, dict) and 'model_state_dict' in state:
+        print("Detected checkpoint format, extracting model_state_dict...")
+        model.load_state_dict(state['model_state_dict'])
+        if 'epoch' in state:
+            print(f"  Checkpoint from epoch {state['epoch'] + 1}")
+        if 'val_loss' in state:
+            print(f"  Validation loss: {state['val_loss']:.4f}")
+    else:
+        model.load_state_dict(state)
+    
     model.eval()
     print("Model loaded successfully!")
 
@@ -111,7 +122,7 @@ def export_quantized(pt_path: str, bin_path: str):
 
     import os
     file_size = os.path.getsize(bin_path)
-    print(f"\n✓ Successfully exported quantized NNUE to {bin_path}")
+    print(f"\nSuccessfully exported quantized NNUE to {bin_path}")
     print(f"  File size: {file_size:,} bytes ({file_size / 1024 / 1024:.2f} MB)")
     print(f"\nBinary format:")
     print(f"  - FEATURE_DIM: {FEATURE_DIM}")
@@ -123,19 +134,31 @@ def export_quantized(pt_path: str, bin_path: str):
 
 if __name__ == "__main__":
     import sys
+    import argparse
     
-    # Allow custom paths via command line arguments
-    if len(sys.argv) >= 2:
-        pt_path = sys.argv[1]
-        bin_path = sys.argv[2] if len(sys.argv) >= 3 else "nnue_weights.bin"
-    else:
-        pt_path = "nnue_state_dict.pt"
-        bin_path = "nnue_weights.bin"
+    parser = argparse.ArgumentParser(
+        description="Export trained NNUE PyTorch model to quantized int16 binary format"
+    )
+    parser.add_argument(
+        "-i", "--input",
+        type=str,
+        default="nnue_state_dict.pt",
+        help="Input PyTorch model file (.pt) (default: nnue_state_dict.pt)"
+    )
+    parser.add_argument(
+        "-o", "--output",
+        type=str,
+        default="nnue_weights.bin",
+        help="Output binary file (.bin) (default: nnue_weights.bin)"
+    )
+    
+    args = parser.parse_args()
     
     try:
-        export_quantized(pt_path, bin_path)
+        export_quantized(args.input, args.output)
     except Exception as e:
-        print(f"\n❌ Error during export: {e}")
+        print(f"\nError during export: {e}")
         import traceback
         traceback.print_exc()
         sys.exit(1)
+
