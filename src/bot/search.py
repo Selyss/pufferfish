@@ -86,14 +86,6 @@ class AlphaBetaSearch:
             best_score = 0.0
             best_probabilities = {best_move: 1.0}
 
-        # Final sanity check: verify the move is legal
-        if best_move not in state.board.legal_moves:
-            legal_moves = list(state.board.generate_legal_moves())
-            if not legal_moves:
-                raise ValueError("No legal moves available.")
-            best_move = legal_moves[0]
-            best_probabilities = {best_move: 1.0}
-
         return SearchResult(
             move=best_move,
             score=best_score,
@@ -120,16 +112,17 @@ class AlphaBetaSearch:
             return self._terminal_score(state.board, 0), None, []
 
         for move in moves:
-            self._check_time(deadline)
-            state.push(move)
-            score = -self._negamax(state, depth - 1, -beta, -alpha, 1, deadline)
-            state.pop()
-            root_scores.append((move, score))
-            if score > best_score:
-                best_score = score
-                best_move = move
-            if score > alpha:
-                alpha = score
+            if move in state.board.legal_moves:
+                self._check_time(deadline)
+                state.push(move)
+                score = -self._negamax(state, depth - 1, -beta, -alpha, 1, deadline)
+                state.pop()
+                root_scores.append((move, score))
+                if score > best_score:
+                    best_score = score
+                    best_move = move
+                if score > alpha:
+                    alpha = score
 
         return best_score, best_move, root_scores
 
