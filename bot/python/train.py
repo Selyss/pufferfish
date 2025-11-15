@@ -11,21 +11,16 @@ from model import NNUEModel
 
 def fen_to_features(fen: str) -> torch.Tensor:
     """
-    Convert a FEN string to a binary feature vector.
-    Uses HalfKP-like encoding: for each piece, encode its position relative to king positions.
+    Proper HalfKP encoding: encode position from BOTH our perspective AND opponent's perspective.
     
-    Feature layout:
-    - 64 squares * 10 piece types (WP, WN, WB, WR, WQ, BP, BN, BB, BR, BQ) * 64 king positions
-    - Total: 64 * 10 * 64 = 40,960 features per side (white perspective, black perspective)
-    - Full feature space: 40,960 * 2 = 81,920
-    
-    For simplicity, we'll use a simpler encoding:
-    - 64 squares * 12 piece types (6 white, 6 black) = 768 features
+    Returns:
+        features: 1536 floats = [our_perspective (768), enemy_perspective (768)]
     """
     board = chess.Board(fen)
     
-    # Simple piece-square encoding: 64 squares * 12 piece types
-    features = torch.zeros(768, dtype=torch.float32)
+    # Create features for both perspectives
+    our_features = torch.zeros(768, dtype=torch.float32)
+    enemy_features = torch.zeros(768, dtype=torch.float32)
     
     piece_to_idx = {
         chess.PAWN: 0,
@@ -36,17 +31,41 @@ def fen_to_features(fen: str) -> torch.Tensor:
         chess.KING: 5,
     }
     
+    # Encode from side-to-move's perspective
+    our_color = board.turn  # True for white, False for black
+    
     for square in chess.SQUARES:
         piece = board.piece_at(square)
-        if piece is not None:
-            # White pieces: indices 0-5, Black pieces: indices 6-11
-            piece_offset = piece_to_idx[piece.piece_type]
-            if piece.color == chess.BLACK:
-                piece_offset += 6
-            
-            # Feature index: square * 12 + piece_type
-            feature_idx = square * 12 + piece_offset
-            features[feature_idx] = 1.0
+        if piece is None:
+            continue
+        
+        is_ours = (piece.color == our_color)
+        piece_type_idx = piece_to_idx[piece.piece_type]
+        
+        # === OUR PERSPECTIVE (side-to-move) ===
+        # If black to move, flip the board vertically
+        sq_our = square
+        if not our_color:
+            file = square % 8
+            rank = square // 8
+            sq_our = (7 - rank) * 8 + file
+        
+        # Our pieces: indices 0-5, opponent's pieces: 6-11
+        piece_idx_our = piece_type_idx if is_ours else piece_type_idx + 6
+        our_features[sq_our * 12 + piece_idx_our] = 1.0
+        
+        # === OPPONENT'S PERSPECTIVE (side-to-move's opponent) ===
+        # Always flip the board for opponent's view
+        file = square % 8
+        rank = square // 8
+        sq_enemy = (7 - rank) * 8 + file
+        
+        # From opponent's perspective, swap our/enemy pieces
+        piece_idx_enemy = piece_type_idx if not is_ours else piece_type_idx + 6
+        enemy_features[sq_enemy * 12 + piece_idx_enemy] = 1.0
+    
+    # Concatenate both perspectives: [our_view, enemy_view] = 1536 features
+    features = torch.cat([our_features, enemy_features])
     
     return features
 
@@ -71,8 +90,14 @@ class ChessDataset(Dataset):
         fen = sample['fen']
         cp_label = sample['cp_label']
         
-        # Convert FEN to features
+        # Convert FEN to features (perspective-flipped if black to move)
         features = fen_to_features(fen)
+        
+        # Flip target if black to move (perspective-aware training)
+        # FEN format: "...w..." means white to move, "...b..." means black to move
+        fen_parts = fen.split()
+        if len(fen_parts) > 1 and fen_parts[1] == 'b':
+            cp_label = -cp_label  # Negate evaluation for black perspective
         
         # Convert cp_label to float32 tensor to match model dtype
         target = torch.tensor(cp_label, dtype=torch.float32)
@@ -153,11 +178,11 @@ def train_nnue(
     model = NNUEModel().to(device)
     
     # Dataset version identifier
-    DATASET_VERSION = "preprocessed-balanced-v1"
+    DATASET_VERSION = "rebalanced-preprocessed-v2-flipped"
     
     # Load and split dataset
     print("Loading dataset from Hugging Face...")
-    full_dataset = load_dataset("LegendaryAKx3/preprocessed-balanced", split="train")
+    full_dataset = load_dataset("LegendaryAKx3/rebalanced-preprocessed", split="train")
     train_data, val_data = create_stratified_split(
         full_dataset, 
         val_ratio=val_ratio, 

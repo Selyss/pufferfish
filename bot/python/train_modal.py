@@ -25,83 +25,182 @@ image = (
 # Create a volume to persist the trained model
 volume = modal.Volume.from_name("pufferfish-models", create_if_missing=True)
 
+# Global functions for multiprocessing (must be at module level for pickling)
+def fen_to_features_and_target(fen_and_label):
+    """
+    Extract 795 features from FEN with proper perspective flipping.
+    
+    Features (795 total):
+    - 768: piece-square occupancies (64 squares × 12 piece types from side-to-move perspective)
+    - 1: side-to-move (1.0 if white, 0.0 if black - but we always normalize to 1.0 after flip)
+    - 4: castling rights (our kingside, our queenside, enemy kingside, enemy queenside)
+    - 8: en-passant file (one-hot encoding, 0-7 or all zeros if none)
+    - 6: material balance per piece type (pawns, knights, bishops, rooks, queens, kings)
+    - 6: our piece counts (P, N, B, R, Q, K)
+    - 1: game phase (0.0=opening, 1.0=endgame based on material)
+    
+    Returns:
+        features: 795 floats
+        target: evaluation from side-to-move's perspective
+    """
+    fen, cp_label = fen_and_label
+    import chess
+    import numpy as np
+    
+    try:
+        board = chess.Board(fen)
+        features = np.zeros(795, dtype=np.float32)
+        
+        piece_map = {1: 0, 2: 1, 3: 2, 4: 3, 5: 4, 6: 5}  # PAWN through KING
+        our_color = board.turn  # True for white, False for black
+        
+        # === PIECE-SQUARE FEATURES (768) ===
+        for square in range(64):
+            piece = board.piece_at(square)
+            if piece is None:
+                continue
+            
+            is_ours = (piece.color == our_color)
+            piece_type_idx = piece_map[piece.piece_type]
+            
+            # If black to move, flip the board vertically
+            sq = square
+            if not our_color:
+                file = square % 8
+                rank = square // 8
+                sq = (7 - rank) * 8 + file
+            
+            # Our pieces: indices 0-5, opponent's pieces: 6-11
+            piece_idx = piece_type_idx if is_ours else piece_type_idx + 6
+            features[sq * 12 + piece_idx] = 1.0
+        
+        idx = 768
+        
+        # === SIDE-TO-MOVE (1) ===
+        # After perspective flip, we're always encoding from "our" perspective
+        # So this is always 1.0 (we are to move)
+        features[idx] = 1.0
+        idx += 1
+        
+        # === CASTLING RIGHTS (4) ===
+        # Our kingside, our queenside, enemy kingside, enemy queenside
+        features[idx] = 1.0 if board.has_kingside_castling_rights(our_color) else 0.0
+        features[idx + 1] = 1.0 if board.has_queenside_castling_rights(our_color) else 0.0
+        features[idx + 2] = 1.0 if board.has_kingside_castling_rights(not our_color) else 0.0
+        features[idx + 3] = 1.0 if board.has_queenside_castling_rights(not our_color) else 0.0
+        idx += 4
+        
+        # === EN-PASSANT FILE (8) ===
+        # One-hot encoding of en-passant file (0-7), or all zeros if none
+        if board.ep_square is not None:
+            ep_file = board.ep_square % 8
+            # If black to move, mirror the file
+            if not our_color:
+                ep_file = 7 - ep_file
+            features[idx + ep_file] = 1.0
+        idx += 8
+        
+        # === MATERIAL BALANCE (6) ===
+        # Count pieces: positive if we have more, negative if opponent has more
+        piece_values = {1: 1, 2: 3, 3: 3, 4: 5, 5: 9, 6: 0}  # P, N, B, R, Q, K
+        for piece_type in range(1, 7):
+            our_count = len(board.pieces(piece_type, our_color))
+            enemy_count = len(board.pieces(piece_type, not our_color))
+            features[idx] = float(our_count - enemy_count) / 8.0  # Normalize
+            idx += 1
+        
+        # === OUR PIECE COUNTS (6) ===
+        # Normalized counts of our pieces
+        for piece_type in range(1, 7):
+            count = len(board.pieces(piece_type, our_color))
+            features[idx] = float(count) / 8.0  # Normalize (max 8 pawns, etc.)
+            idx += 1
+        
+        # === GAME PHASE (1) ===
+        # Estimate game phase based on material (0=opening, 1=endgame)
+        total_material = 0
+        for color in [chess.WHITE, chess.BLACK]:
+            for piece_type, value in piece_values.items():
+                if piece_type != 6:  # Don't count kings
+                    total_material += len(board.pieces(piece_type, color)) * value
+        
+        # Max material at start: 16 pawns + 4 knights + 4 bishops + 4 rooks + 2 queens = 78
+        max_material = 78.0
+        phase = 1.0 - (total_material / max_material)  # 0 at start, 1 at end
+        features[idx] = phase
+        
+        # Flip target if black to move (cp_label is from white's perspective)
+        target = cp_label if our_color else -cp_label
+        
+        return features, target
+    except Exception as e:
+        # Return zero vector and zero target for invalid FENs
+        return np.zeros(795, dtype=np.float32), 0.0
+
 @app.function(
     image=image,
-    timeout=60 * 60 * 3,
+    timeout=60 * 60 * 4,  # 4 hour timeout for preprocessing
     volumes={"/models": volume},
-    cpu=8.0,
+    cpu=32.0,  # Maximum CPUs for parallel processing
+    memory=65536,  # 64GB RAM for large dataset operations
 )
 def preprocess_features():
     """
-    Preprocess all FEN strings to feature tensors once.
+    Preprocess all FEN strings to feature tensors once with maximum parallelization.
     This eliminates the CPU bottleneck during training.
     
     Run with: modal run train_modal.py::preprocess_features
     """
-    import torch
-    import chess
     import numpy as np
     from datasets import load_dataset
     import os
+    from multiprocessing import Pool, cpu_count
     
-    def fen_to_features_batch(fens):
-        """Batch process FEN strings to features."""
-        features_list = []
-        for fen in fens:
-            board = chess.Board(fen)
-            features = torch.zeros(768, dtype=torch.float32)
-            
-            piece_to_idx = {
-                chess.PAWN: 0,
-                chess.KNIGHT: 1,
-                chess.BISHOP: 2,
-                chess.ROOK: 3,
-                chess.QUEEN: 4,
-                chess.KING: 5,
-            }
-            
-            for square in chess.SQUARES:
-                piece = board.piece_at(square)
-                if piece is not None:
-                    piece_offset = piece_to_idx[piece.piece_type]
-                    if piece.color == chess.BLACK:
-                        piece_offset += 6
-                    feature_idx = square * 12 + piece_offset
-                    features[feature_idx] = 1.0
-            
-            features_list.append(features.numpy())
-        
-        return np.array(features_list, dtype=np.float32)
+    def process_batch_parallel(fen_label_pairs, num_workers):
+        """Process a batch of (FEN, label) pairs using all available CPU cores."""
+        with Pool(num_workers) as pool:
+            results = pool.map(fen_to_features_and_target, fen_label_pairs, chunksize=1000)
+        features = np.array([r[0] for r in results], dtype=np.float32)
+        targets = np.array([r[1] for r in results], dtype=np.float32)
+        return features, targets
     
     print("Loading dataset from Hugging Face...")
-    dataset = load_dataset("LegendaryAKx3/preprocessed-balanced", split="train")
+    dataset = load_dataset("LegendaryAKx3/rebalanced-preprocessed", split="train")
     
+    num_workers = cpu_count()
     print(f"Preprocessing {len(dataset):,} FEN strings to features...")
-    print("This will take 30-60 minutes but only needs to be done once.")
+    print(f"Using {num_workers} CPU cores with aggressive parallelization")
+    print("Estimated time: 10-20 minutes with maximum optimization")
     
     all_features = []
     all_targets = []
     
-    batch_size = 10000
+    # Much larger batch size for better parallel efficiency
+    batch_size = 100000
+    num_batches = (len(dataset) + batch_size - 1) // batch_size
+    
+    print(f"Processing in {num_batches} batches of {batch_size:,} samples each")
+    
     for i in range(0, len(dataset), batch_size):
         end_idx = min(i + batch_size, len(dataset))
         batch = dataset.select(range(i, end_idx))
         
-        fens = [sample['fen'] for sample in batch]
-        targets = [sample['cp_label'] for sample in batch]
+        # Create (fen, label) pairs for parallel processing
+        fen_label_pairs = [(sample['fen'], sample['cp_label']) for sample in batch]
         
-        batch_features = fen_to_features_batch(fens)
+        # Parallel processing - returns both features and flipped targets
+        batch_features, batch_targets = process_batch_parallel(fen_label_pairs, num_workers)
         all_features.append(batch_features)
-        all_targets.extend(targets)
+        all_targets.extend(batch_targets.tolist())
         
-        if (i // batch_size + 1) % 100 == 0:
-            print(f"  Processed {end_idx:,}/{len(dataset):,} samples ({100*end_idx/len(dataset):.1f}%)")
+        progress = 100 * end_idx / len(dataset)
+        print(f"  [{progress:5.1f}%] Processed {end_idx:,}/{len(dataset):,} samples")
     
     print("Concatenating arrays...")
     all_features = np.concatenate(all_features, axis=0)
     all_targets = np.array(all_targets, dtype=np.float32)
     
-    cache_path = "/models/cached_features_v1.npz"
+    cache_path = "/models/cached_features_simple_nnue_795.npz"
     print(f"Saving preprocessed features to {cache_path}...")
     
     os.makedirs("/models", exist_ok=True)
@@ -136,137 +235,130 @@ def train_on_modal(
     import torch
     import torch.nn as nn
     import torch.optim as optim
-    from torch.utils.data import Dataset, DataLoader
-    import chess
-    from datasets import load_dataset
+    from torch.utils.data import DataLoader
     
     # Configuration constants
-    FEATURE_DIM = 768
-    ACC_UNITS = 256
-    HIDDEN1 = 32
-    HIDDEN2 = 32
+    FEATURE_DIM = 795  # Enhanced feature set
     
-    # Define the model inline
-    class NNUEModel(nn.Module):
+    # Architecture: 795 -> 2048 -> 2048 -> 1024 -> 512 -> 256 -> 1
+    HIDDEN1 = 2048
+    HIDDEN2 = 2048
+    HIDDEN3 = 1024
+    HIDDEN4 = 512
+    HIDDEN5 = 256
+    
+    DROPOUT_RATE = 0.05
+    
+    # Define ResidualBlock for reuse
+    class ResidualBlock(nn.Module):
+        def __init__(self, dim, dropout_rate=0.05):
+            super().__init__()
+            self.fc1 = nn.Linear(dim, dim)
+            self.fc2 = nn.Linear(dim, dim)
+            self.norm = nn.LayerNorm(dim)
+            self.dropout = nn.Dropout(dropout_rate)
+            
+        def forward(self, x):
+            residual = x
+            out = torch.relu(self.fc1(x))
+            out = self.dropout(out)
+            out = self.fc2(out)
+            out = out + residual  # Skip connection
+            out = self.norm(out)
+            return out
+    
+    # Define the SimpleNNUE model with deep residual architecture
+    class SimpleNNUE(nn.Module):
         def __init__(self):
             super().__init__()
-            input_dim = FEATURE_DIM
             
-            # Accumulator projections
-            self.acc_friendly = nn.Linear(input_dim, ACC_UNITS)
-            self.acc_enemy = nn.Linear(input_dim, ACC_UNITS)
+            # Stage 1: 795 -> 2048
+            self.fc1 = nn.Linear(FEATURE_DIM, HIDDEN1)
+            self.norm1 = nn.LayerNorm(HIDDEN1)
+            self.dropout1 = nn.Dropout(DROPOUT_RATE)
+            self.res1_1 = ResidualBlock(HIDDEN1, DROPOUT_RATE)
+            self.res1_2 = ResidualBlock(HIDDEN1, DROPOUT_RATE)
             
-            # Fully connected part
-            self.fc1 = nn.Linear(2 * ACC_UNITS, HIDDEN1)
+            # Stage 2: 2048 -> 2048
             self.fc2 = nn.Linear(HIDDEN1, HIDDEN2)
-            self.fc_out = nn.Linear(HIDDEN2, 1)
+            self.norm2 = nn.LayerNorm(HIDDEN2)
+            self.dropout2 = nn.Dropout(DROPOUT_RATE)
+            self.res2_1 = ResidualBlock(HIDDEN2, DROPOUT_RATE)
+            self.res2_2 = ResidualBlock(HIDDEN2, DROPOUT_RATE)
+            
+            # Stage 3: 2048 -> 1024
+            self.fc3 = nn.Linear(HIDDEN2, HIDDEN3)
+            self.norm3 = nn.LayerNorm(HIDDEN3)
+            self.dropout3 = nn.Dropout(DROPOUT_RATE)
+            self.res3_1 = ResidualBlock(HIDDEN3, DROPOUT_RATE)
+            self.res3_2 = ResidualBlock(HIDDEN3, DROPOUT_RATE)
+            
+            # Stage 4: 1024 -> 512
+            self.fc4 = nn.Linear(HIDDEN3, HIDDEN4)
+            self.norm4 = nn.LayerNorm(HIDDEN4)
+            self.dropout4 = nn.Dropout(DROPOUT_RATE)
+            self.res4_1 = ResidualBlock(HIDDEN4, DROPOUT_RATE)
+            self.res4_2 = ResidualBlock(HIDDEN4, DROPOUT_RATE)
+            
+            # Stage 5: 512 -> 256
+            self.fc5 = nn.Linear(HIDDEN4, HIDDEN5)
+            self.norm5 = nn.LayerNorm(HIDDEN5)
+            self.dropout5 = nn.Dropout(DROPOUT_RATE)
+            self.res5_1 = ResidualBlock(HIDDEN5, DROPOUT_RATE)
+            self.res5_2 = ResidualBlock(HIDDEN5, DROPOUT_RATE)
+            
+            # Output head: 256 -> 1 (no activation)
+            self.fc_out = nn.Linear(HIDDEN5, 1)
         
         def forward(self, x):
-            acc_f = self.acc_friendly(x)
-            acc_e = self.acc_enemy(x)
+            # Stage 1
+            x = torch.relu(self.fc1(x))
+            x = self.norm1(x)
+            x = self.dropout1(x)
+            x = self.res1_1(x)
+            x = self.res1_2(x)
             
-            acc_f = torch.relu(acc_f)
-            acc_e = torch.relu(acc_e)
+            # Stage 2
+            x = torch.relu(self.fc2(x))
+            x = self.norm2(x)
+            x = self.dropout2(x)
+            x = self.res2_1(x)
+            x = self.res2_2(x)
             
-            combined = torch.cat([acc_f, acc_e], dim=1)
+            # Stage 3
+            x = torch.relu(self.fc3(x))
+            x = self.norm3(x)
+            x = self.dropout3(x)
+            x = self.res3_1(x)
+            x = self.res3_2(x)
             
-            y = torch.relu(self.fc1(combined))
-            y = torch.relu(self.fc2(y))
-            y = self.fc_out(y)
-            return y
-    
-    def fen_to_features(fen: str) -> torch.Tensor:
-        """Convert FEN to feature vector."""
-        board = chess.Board(fen)
-        features = torch.zeros(768, dtype=torch.float32)
-        
-        piece_to_idx = {
-            chess.PAWN: 0,
-            chess.KNIGHT: 1,
-            chess.BISHOP: 2,
-            chess.ROOK: 3,
-            chess.QUEEN: 4,
-            chess.KING: 5,
-        }
-        
-        for square in chess.SQUARES:
-            piece = board.piece_at(square)
-            if piece is not None:
-                piece_offset = piece_to_idx[piece.piece_type]
-                if piece.color == chess.BLACK:
-                    piece_offset += 6
-                feature_idx = square * 12 + piece_offset
-                features[feature_idx] = 1.0
-        
-        return features
-    
-    class ChessDataset(Dataset):
-        def __init__(self, data):
-            super().__init__()
-            self.data = data
-        
-        def __len__(self):
-            return len(self.data)
-        
-        def __getitem__(self, idx):
-            sample = self.data[idx]
-            fen = sample['fen']
-            cp_label = sample['cp_label']
+            # Stage 4
+            x = torch.relu(self.fc4(x))
+            x = self.norm4(x)
+            x = self.dropout4(x)
+            x = self.res4_1(x)
+            x = self.res4_2(x)
             
-            features = fen_to_features(fen)
-            target = torch.tensor(cp_label, dtype=torch.float32)
+            # Stage 5
+            x = torch.relu(self.fc5(x))
+            x = self.norm5(x)
+            x = self.dropout5(x)
+            x = self.res5_1(x)
+            x = self.res5_2(x)
             
-            return features, target
-    
-    def create_stratified_split(dataset, val_ratio=0.05, max_samples=None, seed=42):
-        """Create stratified train/validation split based on binned cp_label values."""
-        import numpy as np
-        from sklearn.model_selection import train_test_split
-        
-        if max_samples is not None:
-            dataset = dataset.select(range(min(max_samples, len(dataset))))
-        
-        print(f"Creating stratified split from {len(dataset)} samples...")
-        
-        cp_labels = np.array(dataset['cp_label'])
-        
-        # Bin the continuous targets for stratification
-        n_bins = 20
-        bins = np.percentile(cp_labels, np.linspace(0, 100, n_bins + 1))
-        bins = np.unique(bins)
-        stratify_labels = np.digitize(cp_labels, bins[:-1])
-        
-        indices = np.arange(len(dataset))
-        
-        train_indices, val_indices = train_test_split(
-            indices,
-            test_size=val_ratio,
-            stratify=stratify_labels,
-            random_state=seed
-        )
-        
-        train_data = dataset.select(train_indices.tolist())
-        val_data = dataset.select(val_indices.tolist())
-        
-        print(f"Train samples: {len(train_data)}")
-        print(f"Validation samples: {len(val_data)}")
-        
-        train_cp = np.array(train_data['cp_label'])
-        val_cp = np.array(val_data['cp_label'])
-        print(f"Train cp_label: mean={train_cp.mean():.2f}, std={train_cp.std():.2f}")
-        print(f"Val cp_label: mean={val_cp.mean():.2f}, std={val_cp.std():.2f}")
-        
-        return train_data, val_data
+            # Output (no activation)
+            x = self.fc_out(x)
+            return x
     
     # Training setup
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
     print(f"Training with batch_size={batch_size}, lr={lr}, epochs={num_epochs}")
     
-    model = NNUEModel().to(device)
+    model = SimpleNNUE().to(device)
     
     # Dataset version identifier
-    DATASET_VERSION = "preprocessed-balanced-v1"
+    DATASET_VERSION = "rebalanced-preprocessed-v2-flipped"
     
     # Load preprocessed features from cache
     print("Loading cached features...")
@@ -276,7 +368,7 @@ def train_on_modal(
     from sklearn.model_selection import train_test_split
     from torch.utils.data import TensorDataset
     
-    cache_path = "/models/cached_features_v1.npz"
+    cache_path = "/models/cached_features_simple_nnue_795.npz"
     
     if not os.path.exists(cache_path):
         raise FileNotFoundError(
@@ -284,11 +376,31 @@ def train_on_modal(
             "Please run: modal run train_modal.py::preprocess_features"
         )
     
+    print("Loading and validating cached features...")
     data = np.load(cache_path)
+    
+    # Validate cache file structure
+    if 'features' not in data or 'targets' not in data:
+        raise ValueError(
+            f"Cache file {cache_path} is corrupted or from old version. "
+            f"Expected 'features' and 'targets' arrays. "
+            f"Please rerun preprocessing: modal run train_modal.py::preprocess_features"
+        )
+    
     features = torch.from_numpy(data['features']).float()
     targets = torch.from_numpy(data['targets']).float()
     
+    # Validate dimensions
+    if features.shape[1] != 795:
+        raise ValueError(
+            f"Features have wrong dimension: {features.shape[1]}, expected 795. "
+            f"Cache file may be corrupted. Please rerun preprocessing."
+        )
+    
     print(f"Loaded {len(features)} preprocessed samples")
+    print(f"Feature shape: {features.shape}")
+    print(f"Target stats: mean={targets.mean():.2f}, std={targets.std():.2f}, "
+          f"min={targets.min():.2f}, max={targets.max():.2f}")
     
     # Apply max_samples limit if specified
     if max_samples is not None and max_samples < len(features):
@@ -479,18 +591,6 @@ def train_on_modal(
         # Check for overfitting
         if avg_val_loss > avg_loss * 1.5:
             print(f"  Warning: Possible overfitting detected (val_loss / train_loss = {avg_val_loss / avg_loss:.2f})")
-        
-        # Check for dead neurons every 5 epochs (expensive operation)
-        if (epoch + 1) % 5 == 0:
-            with torch.no_grad():
-                sample_features = next(iter(train_loader))[0].to(device, non_blocking=True)
-                with autocast(device_type='cuda'):
-                    acc_f = model.acc_friendly(sample_features)
-                    acc_e = model.acc_enemy(sample_features)
-                dead_acc_f = (acc_f.max(dim=0)[0] == 0).sum().item()
-                dead_acc_e = (acc_e.max(dim=0)[0] == 0).sum().item()
-                if dead_acc_f > 0 or dead_acc_e > 0:
-                    print(f"  Warning: {dead_acc_f} dead friendly neurons, {dead_acc_e} dead enemy neurons")
         
         # Update learning rate scheduler based on validation loss
         scheduler.step(avg_val_loss)

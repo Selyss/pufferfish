@@ -5,16 +5,19 @@ SQUARES = 64
 PIECE_TYPES = 6      # P, N, B, R, Q, K per color
 COLORS = 2          # white, black
 
-ACC_UNITS = 256      # accumulator size per side
-HIDDEN1 = 32
-HIDDEN2 = 32
+# SimpleNNUE architecture: 795 -> 2048 -> 2048 -> 1024 -> 512 -> 256 -> 1
+FEATURE_DIM = 795    # Enhanced feature set (piece-square + game state)
+HIDDEN1 = 2048
+HIDDEN2 = 2048
+HIDDEN3 = 1024
+HIDDEN4 = 512
+HIDDEN5 = 256
 
-# Total feature count depends on your feature encoding.
-# Using simple piece-square encoding: 64 squares * 12 piece types (6 white + 6 black)
-FEATURE_DIM = 768  # 64 * 12
+DROPOUT_RATE = 0.05
 
-# Quantization parameters
+# Quantization parameters (for export)
 RELU_CLIP = 255
 OUTPUT_SCALE_BITS = 5    # 2^5 = 32
 SCALE1 = 32.0            # scale for first stage
 SCALE2 = 2.0 ** OUTPUT_SCALE_BITS
+
