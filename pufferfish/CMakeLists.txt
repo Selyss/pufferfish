@@ -27,3 +27,7 @@ add_library(pufferfish_engine
 add_executable(pufferfish main.cpp)
 target_link_libraries(pufferfish PRIVATE pufferfish_engine)
 
+# Tests target
+add_executable(pufferfish_tests tests.cpp)
+target_link_libraries(pufferfish_tests PRIVATE pufferfish_engine)
+

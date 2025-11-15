@@ -7,8 +7,8 @@
 #include "engine/position.h"
 #include "engine/movegen.h"
 #include "engine/tt.h"
-// #include "engine/nn_interface.h"
-// #include "engine/search.h"
+#include "engine/nn_interface.h"
+#include "engine/search.h"
 
 using namespace pf;
 
