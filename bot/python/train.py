@@ -59,18 +59,9 @@ class ChessDataset(Dataset):
     Columns: fen (string), depth (int32), knodes (int32), cp_label (int32)
     """
 
-    def __init__(self, split: str = "train", max_samples: int = None):
+    def __init__(self, data):
         super().__init__()
-        print(f"Loading dataset split: {split}...")
-        
-        # Load dataset from Hugging Face
-        dataset = load_dataset("LegendaryAKx3/light-preprocessed", split=split)
-        
-        if max_samples is not None:
-            dataset = dataset.select(range(min(max_samples, len(dataset))))
-        
-        self.data = dataset
-        print(f"Loaded {len(self.data)} samples")
+        self.data = data
 
     def __len__(self):
         return len(self.data)
@@ -89,6 +80,65 @@ class ChessDataset(Dataset):
         return features, target
 
 
+def create_stratified_split(dataset, val_ratio=0.05, max_samples=None, seed=42):
+    """
+    Create stratified train/validation split based on binned cp_label values.
+    
+    Args:
+        dataset: HuggingFace dataset
+        val_ratio: Fraction of data to use for validation (default 0.05 = 5%)
+        max_samples: Limit total samples (applied before split)
+        seed: Random seed for reproducibility
+    
+    Returns:
+        train_dataset, val_dataset
+    """
+    import numpy as np
+    from sklearn.model_selection import train_test_split
+    
+    # Limit samples if requested
+    if max_samples is not None:
+        dataset = dataset.select(range(min(max_samples, len(dataset))))
+    
+    print(f"Creating stratified split from {len(dataset)} samples...")
+    
+    # Get all cp_labels
+    cp_labels = np.array(dataset['cp_label'])
+    
+    # Bin the continuous targets for stratification
+    # Use quantile-based binning to ensure balanced bins
+    n_bins = 20
+    bins = np.percentile(cp_labels, np.linspace(0, 100, n_bins + 1))
+    bins = np.unique(bins)  # Remove duplicates
+    stratify_labels = np.digitize(cp_labels, bins[:-1])
+    
+    # Create indices
+    indices = np.arange(len(dataset))
+    
+    # Stratified split
+    train_indices, val_indices = train_test_split(
+        indices,
+        test_size=val_ratio,
+        stratify=stratify_labels,
+        random_state=seed
+    )
+    
+    # Create subsets
+    train_data = dataset.select(train_indices.tolist())
+    val_data = dataset.select(val_indices.tolist())
+    
+    print(f"Train samples: {len(train_data)}")
+    print(f"Validation samples: {len(val_data)}")
+    
+    # Print distribution statistics
+    train_cp = np.array(train_data['cp_label'])
+    val_cp = np.array(val_data['cp_label'])
+    print(f"Train cp_label: mean={train_cp.mean():.2f}, std={train_cp.std():.2f}")
+    print(f"Val cp_label: mean={val_cp.mean():.2f}, std={val_cp.std():.2f}")
+    
+    return train_data, val_data
+
+
 def train_nnue(
     num_epochs: int = 5,
     batch_size: int = 64,
@@ -96,19 +146,32 @@ def train_nnue(
     device: str = "cuda" if torch.cuda.is_available() else "cpu",
     max_samples: int = None,
     checkpoint_dir: str = "checkpoints",
+    val_ratio: float = 0.05,
 ):
     import os
     
     model = NNUEModel().to(device)
     
-    # Load training dataset
-    train_dataset = ChessDataset(split="train", max_samples=max_samples)
+    # Load and split dataset
+    print("Loading dataset from Hugging Face...")
+    full_dataset = load_dataset("LegendaryAKx3/light-preprocessed", split="train")
+    train_data, val_data = create_stratified_split(
+        full_dataset, 
+        val_ratio=val_ratio, 
+        max_samples=max_samples
+    )
+    
+    # Create datasets and loaders
+    train_dataset = ChessDataset(train_data)
+    val_dataset = ChessDataset(val_data)
+    
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=lr)
     
-    # Add learning rate scheduler
+    # Add learning rate scheduler - now using validation loss
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, 
         mode='min', 
@@ -180,10 +243,33 @@ def train_nnue(
         avg_grad_norm = sum(grad_norms) / len(grad_norms)
         current_lr = optimizer.param_groups[0]['lr']
         
+        # Validation phase
+        model.eval()
+        val_loss = 0.0
+        val_batches = 0
+        
+        with torch.no_grad():
+            for features, targets in val_loader:
+                features = features.to(device)
+                targets = targets.to(device).view(-1)
+                
+                outputs = model(features).squeeze()
+                loss = criterion(outputs, targets)
+                
+                val_loss += loss.item()
+                val_batches += 1
+        
+        avg_val_loss = val_loss / val_batches
+        
         print(f"\nEpoch {epoch + 1}/{num_epochs} completed:")
-        print(f"  Average Loss: {avg_loss:.4f}")
+        print(f"  Train Loss: {avg_loss:.4f}")
+        print(f"  Validation Loss: {avg_val_loss:.4f}")
         print(f"  Average Gradient Norm: {avg_grad_norm:.4f}")
         print(f"  Learning Rate: {current_lr:.6f}")
+        
+        # Check for overfitting
+        if avg_val_loss > avg_loss * 1.5:
+            print(f"  Warning: Possible overfitting detected (val_loss / train_loss = {avg_val_loss / avg_loss:.2f})")
         
         # Check for dead neurons
         with torch.no_grad():
@@ -195,10 +281,8 @@ def train_nnue(
             if dead_acc_f > 0 or dead_acc_e > 0:
                 print(f"  Warning: {dead_acc_f} dead friendly neurons, {dead_acc_e} dead enemy neurons")
         
-        # Update learning rate scheduler
-        scheduler.step(avg_loss)
-        # Update learning rate scheduler
-        scheduler.step(avg_loss)
+        # Update learning rate scheduler based on validation loss
+        scheduler.step(avg_val_loss)
         
         # Save checkpoint after each epoch
         checkpoint = {
@@ -206,18 +290,19 @@ def train_nnue(
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
             'scheduler_state_dict': scheduler.state_dict(),
-            'loss': avg_loss,
+            'train_loss': avg_loss,
+            'val_loss': avg_val_loss,
             'best_loss': best_loss,
         }
         torch.save(checkpoint, checkpoint_path)
         print(f"  Checkpoint saved: epoch {epoch + 1}")
         
-        # Save best model separately
-        if avg_loss < best_loss:
-            best_loss = avg_loss
+        # Save best model based on validation loss
+        if avg_val_loss < best_loss:
+            best_loss = avg_val_loss
             best_model_path = os.path.join(checkpoint_dir, "nnue_best.pt")
             torch.save(model.state_dict(), best_model_path)
-            print(f"  New best model saved with loss: {best_loss:.4f}")
+            print(f"  New best model saved with validation loss: {best_loss:.4f}")
 
     return model, best_loss
 
