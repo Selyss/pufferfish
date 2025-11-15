@@ -22,7 +22,7 @@ def find_engine() -> str | None:
     return shutil.which('pufferfish')
 
 
-def call_engine(fen: str, movetime_ms: int = 200, timeout_s: float | None = None) -> str | None:
+def call_engine(fen: str, movetime_ms: int = 1000, timeout_s: float | None = None) -> str | None:
     exe = find_engine()
     if not exe:
         return None
