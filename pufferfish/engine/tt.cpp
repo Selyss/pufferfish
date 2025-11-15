@@ -12,7 +12,6 @@ namespace pf
         if (bucketCount == 0)
             bucketCount = 1;
         buckets_.assign(bucketCount, TTBucket{});
-        generation_ = 0;
     }
 
     void TranspositionTable::clear()
@@ -20,10 +19,7 @@ namespace pf
         for (auto &b : buckets_)
         {
             for (int i = 0; i < TTBucket::SIZE; ++i)
-            {
                 b.e[i] = TTEntry{};
-                b.e[i].gen = 0;
-            }
         }
     }
 
@@ -99,9 +95,7 @@ namespace pf
                 replace = &e;
                 break;
             }
-            int age_e = (e.gen == generation_) ? 1 : 0;
-            int age_r = (replace->gen == generation_) ? 1 : 0;
-            if (age_e < age_r || (age_e == age_r && e.depth < replace->depth))
+            if (e.depth < replace->depth)
                 replace = &e;
         }
         replace->key16 = hi;
@@ -110,7 +104,6 @@ namespace pf
         replace->bound = bound;
         if (best != MOVE_NONE)
             replace->best = best;
-        replace->gen = generation_;
     }
 
     Move TranspositionTable::probe_move(Key key) const
