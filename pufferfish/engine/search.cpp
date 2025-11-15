@@ -109,6 +109,9 @@ namespace pf
 
             if (depth > 1 && result.score > -INF_SCORE && result.score < INF_SCORE)
             {
+                // New generation for this search to improve TT replacement heuristics
+                if (ctx.tt)
+                    ctx.tt->bump_generation();
                 scoreLo = result.score - window;
                 scoreHi = result.score + window;
             }
@@ -272,6 +275,13 @@ namespace pf
         }
 
         ++ctx.stats.nodes;
+        // Periodically decay history to prevent runaway growth
+        if ((ctx.stats.nodes & 0x0FFF) == 0)
+        {
+            for (int p = 0; p < PIECE_NB; ++p)
+                for (int s = 0; s < 64; ++s)
+                    ctx.history[p][s] >>= 1;
+        }
 
         int alphaOrig = alpha;
         TTEntry tte;
