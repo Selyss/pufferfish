@@ -43,16 +43,17 @@ def test_func(ctx: GameContext):
         if not out.stdout:
             return None
         for line in out.stdout.splitlines():
-            parts = line.strip().split()
-            if len(parts) >= 2 and parts[0].lower() == 'bestmove':
+            parts = line.strip().split(maxsplit=1)
+            if len(parts) == 2 and parts[0].lower() == 'bestmove':
+                # Engine now returns SAN only after the keyword
                 return parts[1]
         return None
 
     fen = ctx.board.fen()
-    best_uci = call_engine(fen, movetime_ms=200)
-    if best_uci:
+    best_san = call_engine(fen, movetime_ms=200)
+    if best_san:
         try:
-            mv = Move.from_uci(best_uci)
+            mv = ctx.board.parse_san(best_san)
             if mv in ctx.board.legal_moves:
                 ctx.logProbabilities({mv: 1.0})
                 return mv
