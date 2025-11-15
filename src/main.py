@@ -4,9 +4,17 @@ import time
 import os
 import subprocess
 import shutil
+from huggingface_hub import hf_hub_download
 
 # Write code here that runs once
 # Can do things like load models from huggingface, make connections to subprocesses, etcwenis
+
+# Download NNUE binary from Hugging Face
+NNUE_PATH = hf_hub_download(
+    repo_id="LegendaryAKx3/nnue-bin",
+    filename="nnue_residual.bin",  # Adjust filename if different in your repo
+    repo_type="model"
+)
 
 
 def find_engine() -> str | None:
