@@ -172,9 +172,12 @@ def train_on_modal(
     
     model = NNUEModel().to(device)
     
+    # Dataset version identifier
+    DATASET_VERSION = "preprocessed-balanced-v1"
+    
     # Load and split dataset
     print("Loading dataset from Hugging Face...")
-    full_dataset = load_dataset("LegendaryAKx3/light-preprocessed", split="train")
+    full_dataset = load_dataset("LegendaryAKx3/preprocessed-balanced", split="train")
     train_data, val_data = create_stratified_split(
         full_dataset,
         val_ratio=0.05,
@@ -212,11 +215,11 @@ def train_on_modal(
         min_lr=1e-6
     )
     
-    # Checkpoint paths
+    # Checkpoint paths with dataset version
     checkpoint_dir = "/models/checkpoints"
     import os
     os.makedirs(checkpoint_dir, exist_ok=True)
-    checkpoint_path = f"{checkpoint_dir}/checkpoint_latest.pt"
+    checkpoint_path = f"{checkpoint_dir}/checkpoint_{DATASET_VERSION}_latest.pt"
     
     # Try to resume from checkpoint
     start_epoch = 0
@@ -225,13 +228,22 @@ def train_on_modal(
     if os.path.exists(checkpoint_path):
         print(f"Found checkpoint at {checkpoint_path}, resuming training...")
         checkpoint = torch.load(checkpoint_path, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        if 'scheduler_state_dict' in checkpoint:
-            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-        start_epoch = checkpoint['epoch'] + 1
-        best_loss = checkpoint.get('best_loss', float('inf'))
-        print(f"Resuming from epoch {start_epoch}, best loss: {best_loss:.4f}")
+        
+        # Verify dataset version matches
+        checkpoint_dataset_version = checkpoint.get('dataset_version', 'unknown')
+        if checkpoint_dataset_version != DATASET_VERSION:
+            print(f"Warning: Checkpoint dataset version mismatch!")
+            print(f"  Checkpoint version: {checkpoint_dataset_version}")
+            print(f"  Current version: {DATASET_VERSION}")
+            print("Starting training from scratch with new dataset")
+        else:
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            if 'scheduler_state_dict' in checkpoint:
+                scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            start_epoch = checkpoint['epoch'] + 1
+            best_loss = checkpoint.get('best_loss', float('inf'))
+            print(f"Resuming from epoch {start_epoch}, best loss: {best_loss:.4f}")
     else:
         print("No checkpoint found, starting training from scratch")
     
@@ -327,6 +339,7 @@ def train_on_modal(
             'train_loss': avg_loss,
             'val_loss': avg_val_loss,
             'best_loss': best_loss,
+            'dataset_version': DATASET_VERSION,
         }
         torch.save(checkpoint, checkpoint_path)
         print(f"  Checkpoint saved: epoch {epoch + 1}")
