@@ -4,6 +4,8 @@ import math
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
+import gzip
+
 import chess
 import numpy as np
 import torch
@@ -175,10 +177,17 @@ class LightPreprocessedDataset(Dataset):
         dataset: HFDataset,
         encoder: Optional[FenFeatureEncoder] = None,
         config: Optional[DatasetConfig] = None,
-    ) -> None:
+        file_path: Optional[str] = None
+    ) -> None:        
         self.dataset = dataset
         self.encoder = encoder or FenFeatureEncoder()
         self.config = config or DatasetConfig()
+
+        assert self.config.label_key == "cp_label", "Only cp_label is supported in this version."
+
+        self.file_path = file_path
+        self.fen_to_mate = None
+
         meta_dim = 0
         if self.config.include_depth_feature:
             meta_dim += 1
@@ -190,8 +199,15 @@ class LightPreprocessedDataset(Dataset):
         return len(self.dataset)
 
     def __getitem__(self, idx: int):
+        if self.fen_to_mate is None and self.file_path is not None:
+            self.fen_to_mate = {}
+            with gzip.open(self.file_path, 'rt') as f:
+                for line in f:
+                    fen, mate = line.strip().rsplit(' ', 1)
+                    self.fen_to_mate[fen] = mate
+
         row = self.dataset[idx]
-        base_features = self.encoder.encode(row["fen"])
+        base_features = self.encoder.encode(row["fen"])  # :(
         features = base_features
 
         meta_features = []
@@ -207,8 +223,9 @@ class LightPreprocessedDataset(Dataset):
                 [base_features, np.asarray(meta_features, dtype=np.float32)], axis=0
             )
 
+        adjusted_cp = self.adjust_cp(row[self.config.label_key], row["fen"])
         label = np.array(
-            [row[self.config.label_key] * self.config.target_scale], dtype=np.float32
+            [adjusted_cp * self.config.target_scale], dtype=np.float32
         )
         weight = np.array([self._example_weight(row)], dtype=np.float32)
 
@@ -217,6 +234,27 @@ class LightPreprocessedDataset(Dataset):
             torch.from_numpy(label),
             torch.from_numpy(weight),
         )
+
+    def adjust_cp(self, cp: int, fen: str) -> int:
+        if cp == 0 and self.fen_to_mate is not None and fen in self.fen_to_mate:
+            mate_in = int(float(self.fen_to_mate[fen]))
+
+            absolute_mate_in = abs(mate_in)
+
+            base_adjustment = 2000
+
+            if absolute_mate_in == 1:
+                return (base_adjustment + 2000) * (1 if mate_in > 0 else -1)
+            elif absolute_mate_in == 2:
+                return (base_adjustment + 1500) * (1 if mate_in > 0 else -1)
+            elif absolute_mate_in <= 4:
+                return (base_adjustment + 1000) * (1 if mate_in > 0 else -1)
+            elif absolute_mate_in <= 20:
+                return (base_adjustment + 500) * (1 if mate_in > 0 else -1)
+            else:
+                return base_adjustment * (1 if mate_in > 0 else -1)
+
+        return cp
 
     def _example_weight(self, row: dict) -> float:
         weight = 1.0

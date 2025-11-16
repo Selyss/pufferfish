@@ -8,6 +8,7 @@ from contextlib import nullcontext
 from dataclasses import asdict
 from pathlib import Path
 
+from huggingface_hub import hf_hub_download
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, random_split
@@ -206,13 +207,19 @@ def main() -> None:
         weight_by_knodes=args.weight_by_knodes,
     )
 
+    file_path = hf_hub_download(
+        repo_id="bantmen/lichess_all_mate_positions",
+        filename="all_mate_positions.txt.gz",
+        repo_type="dataset"
+    )
+
     base_dataset = load_light_preprocessed_dataset(split="train", cache_dir=args.cache_dir)
     total_rows = len(base_dataset)
     if args.limit_rows:
         limit = min(args.limit_rows, total_rows)
         base_dataset = base_dataset.select(range(limit))
         print(f"Subsampled dataset to {limit} rows.")
-    dataset = LightPreprocessedDataset(base_dataset, encoder=FenFeatureEncoder(), config=dataset_config)
+    dataset = LightPreprocessedDataset(base_dataset, encoder=FenFeatureEncoder(), config=dataset_config, file_path=file_path)
 
     val_size = max(1, min(600000, int(len(dataset) * args.val_split)))
     train_size = len(dataset) - val_size
