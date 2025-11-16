@@ -6,6 +6,9 @@
 #include <algorithm>
 #include <string>
 
+// Set to true to enable NNUE loading logs, false to disable
+constexpr bool DEBUG_LOGGING = false;
+
 namespace pf
 {
 
@@ -97,34 +100,41 @@ namespace pf
         std::FILE *f = std::fopen(path, "rb");
         if (!f)
         {
-            std::fprintf(stderr, "[ERROR] Failed to open file: %s\n", path);
+            if (DEBUG_LOGGING)
+                std::fprintf(stderr, "[ERROR] Failed to open file: %s\n", path);
             return false;
         }
-        std::fprintf(stderr, "[INFO] Successfully opened: %s\n", path);
+        if (DEBUG_LOGGING)
+            std::fprintf(stderr, "[INFO] Successfully opened: %s\n", path);
 
         // JSON metadata header [u32 length][json utf8]
         uint32_t json_len = 0;
         if (!read_u32(f, json_len))
         {
-            std::fprintf(stderr, "[ERROR] Failed to read JSON length (file may be empty or corrupted)\n");
+            if (DEBUG_LOGGING)
+                std::fprintf(stderr, "[ERROR] Failed to read JSON length (file may be empty or corrupted)\n");
             std::fclose(f);
             return false;
         }
-        std::fprintf(stderr, "[INFO] JSON length: %u bytes\n", json_len);
+        if (DEBUG_LOGGING)
+            std::fprintf(stderr, "[INFO] JSON length: %u bytes\n", json_len);
         if (json_len == 0 || json_len > (32u << 20))
         {
-            std::fprintf(stderr, "[ERROR] Invalid JSON length: %u (expected 1 to %u)\n", json_len, (32u << 20));
+            if (DEBUG_LOGGING)
+                std::fprintf(stderr, "[ERROR] Invalid JSON length: %u (expected 1 to %u)\n", json_len, (32u << 20));
             std::fclose(f);
             return false;
         }
         std::string json(json_len, '\0');
         if (!fread_exact(f, json.data(), json_len))
         {
-            std::fprintf(stderr, "[ERROR] Failed to read JSON data\n");
+            if (DEBUG_LOGGING)
+                std::fprintf(stderr, "[ERROR] Failed to read JSON data\n");
             std::fclose(f);
             return false;
         }
-        std::fprintf(stderr, "[INFO] JSON: %s\n", json.c_str());
+        if (DEBUG_LOGGING)
+            std::fprintf(stderr, "[INFO] JSON: %s\n", json.c_str());
         auto find_val = [&](const char *key) -> std::string
         {
             size_t kpos = json.find(key);
@@ -144,7 +154,8 @@ namespace pf
         std::string fmt = find_val("format");
         if (fmt != "residual-nnue-v1")
         {
-            std::fprintf(stderr, "[ERROR] Invalid format: '%s' (expected 'residual-nnue-v1')\n", fmt.c_str());
+            if (DEBUG_LOGGING)
+                std::fprintf(stderr, "[ERROR] Invalid format: '%s' (expected 'residual-nnue-v1')\n", fmt.c_str());
             std::fclose(f);
             return false;
         }
@@ -152,18 +163,23 @@ namespace pf
         std::string lc_s = find_val("layer_count");
         if (in_s.empty() || lc_s.empty())
         {
-            std::fprintf(stderr, "[ERROR] Missing input_dim or layer_count in JSON\n");
+            if (DEBUG_LOGGING)
+                std::fprintf(stderr, "[ERROR] Missing input_dim or layer_count in JSON\n");
             std::fclose(f);
             return false;
         }
         input_dim_ = std::stoi(in_s);
         int layer_count = std::stoi(lc_s);
-        std::fprintf(stderr, "[INFO] Format: %s\n", fmt.c_str());
-        std::fprintf(stderr, "[INFO] Input dim: %d\n", input_dim_);
-        std::fprintf(stderr, "[INFO] Layer count from JSON: %d\n", layer_count);
+        if (DEBUG_LOGGING)
+        {
+            std::fprintf(stderr, "[INFO] Format: %s\n", fmt.c_str());
+            std::fprintf(stderr, "[INFO] Input dim: %d\n", input_dim_);
+            std::fprintf(stderr, "[INFO] Layer count from JSON: %d\n", layer_count);
+        }
         if (layer_count <= 0)
         {
-            std::fprintf(stderr, "[ERROR] Invalid layer count: %d\n", layer_count);
+            if (DEBUG_LOGGING)
+                std::fprintf(stderr, "[ERROR] Invalid layer count: %d\n", layer_count);
             std::fclose(f);
             return false;
         }
@@ -172,89 +188,105 @@ namespace pf
         uint32_t stored_layer_count = 0;
         if (!read_u32(f, stored_layer_count))
         {
-            std::fprintf(stderr, "[ERROR] Failed to read stored layer count from binary\n");
+            if (DEBUG_LOGGING)
+                std::fprintf(stderr, "[ERROR] Failed to read stored layer count from binary\n");
             std::fclose(f);
             return false;
         }
-        std::fprintf(stderr, "[INFO] Layer count from binary: %u\n", stored_layer_count);
+        if (DEBUG_LOGGING)
+            std::fprintf(stderr, "[INFO] Layer count from binary: %u\n", stored_layer_count);
         if (stored_layer_count != static_cast<uint32_t>(layer_count))
         {
-            std::fprintf(stderr, "[ERROR] Layer count mismatch: JSON=%d, binary=%u\n", layer_count, stored_layer_count);
+            if (DEBUG_LOGGING)
+                std::fprintf(stderr, "[ERROR] Layer count mismatch: JSON=%d, binary=%u\n", layer_count, stored_layer_count);
             std::fclose(f);
             return false;
         }
 
         // Read layer records
-        std::fprintf(stderr, "[INFO] Loading %u layers...\n", stored_layer_count);
+        if (DEBUG_LOGGING)
+            std::fprintf(stderr, "[INFO] Loading %u layers...\n", stored_layer_count);
         for (uint32_t li = 0; li < stored_layer_count; ++li)
         {
             uint32_t type_id = 0;
             if (!read_u32(f, type_id))
             {
-                std::fprintf(stderr, "[ERROR] Failed to read type_id at layer %u\n", li);
+                if (DEBUG_LOGGING)
+                    std::fprintf(stderr, "[ERROR] Failed to read type_id at layer %u\n", li);
                 std::fclose(f);
                 return false;
             }
-            std::fprintf(stderr, "[INFO] Layer %u: type_id=%u", li + 1, type_id);
+            if (DEBUG_LOGGING)
+                std::fprintf(stderr, "[INFO] Layer %u: type_id=%u", li + 1, type_id);
             
             if (type_id == 1) // LINEAR
             {
                 uint32_t out_u = 0, in_u = 0;
                 if (!read_u32(f, out_u) || !read_u32(f, in_u))
                 {
-                    std::fprintf(stderr, " [ERROR] Failed to read dimensions\n");
+                    if (DEBUG_LOGGING)
+                        std::fprintf(stderr, " [ERROR] Failed to read dimensions\n");
                     std::fclose(f);
                     return false;
                 }
                 int outD = static_cast<int>(out_u);
                 int inD = static_cast<int>(in_u);
-                std::fprintf(stderr, " LINEAR %d->%d", inD, outD);
+                if (DEBUG_LOGGING)
+                    std::fprintf(stderr, " LINEAR %d->%d", inD, outD);
                 if (inD <= 0 || outD <= 0)
                 {
-                    std::fprintf(stderr, " [ERROR] Invalid dimensions\n");
+                    if (DEBUG_LOGGING)
+                        std::fprintf(stderr, " [ERROR] Invalid dimensions\n");
                     std::fclose(f);
                     return false;
                 }
                 LinearF L;
                 if (!L.load(f, inD, outD))
                 {
-                    std::fprintf(stderr, " [ERROR] Failed to load weights\n");
+                    if (DEBUG_LOGGING)
+                        std::fprintf(stderr, " [ERROR] Failed to load weights\n");
                     std::fclose(f);
                     return false;
                 }
                 int idx = (int)linears_.size();
                 linears_.push_back(std::move(L));
                 sequence_.push_back({1, idx});
-                std::fprintf(stderr, " ✓\n");
+                if (DEBUG_LOGGING)
+                    std::fprintf(stderr, " ✓\n");
             }
             else if (type_id == 2) // LAYERNORM
             {
                 uint32_t size_u = 0, reserved = 0;
                 if (!read_u32(f, size_u) || !read_u32(f, reserved))
                 {
-                    std::fprintf(stderr, " [ERROR] Failed to read size\n");
+                    if (DEBUG_LOGGING)
+                        std::fprintf(stderr, " [ERROR] Failed to read size\n");
                     std::fclose(f);
                     return false;
                 }
                 int dim = static_cast<int>(size_u);
-                std::fprintf(stderr, " LAYERNORM %d", dim);
+                if (DEBUG_LOGGING)
+                    std::fprintf(stderr, " LAYERNORM %d", dim);
                 if (dim <= 0)
                 {
-                    std::fprintf(stderr, " [ERROR] Invalid dimension\n");
+                    if (DEBUG_LOGGING)
+                        std::fprintf(stderr, " [ERROR] Invalid dimension\n");
                     std::fclose(f);
                     return false;
                 }
                 LayerNormF LN;
                 if (!LN.load(f, dim))
                 {
-                    std::fprintf(stderr, " [ERROR] Failed to load weights\n");
+                    if (DEBUG_LOGGING)
+                        std::fprintf(stderr, " [ERROR] Failed to load weights\n");
                     std::fclose(f);
                     return false;
                 }
                 float eps = 1e-5f;
                 if (!read_f32(f, eps))
                 {
-                    std::fprintf(stderr, " [ERROR] Failed to read eps\n");
+                    if (DEBUG_LOGGING)
+                        std::fprintf(stderr, " [ERROR] Failed to read eps\n");
                     std::fclose(f);
                     return false;
                 }
@@ -262,22 +294,26 @@ namespace pf
                 int idx = (int)norms_.size();
                 norms_.push_back(std::move(LN));
                 sequence_.push_back({2, idx});
-                std::fprintf(stderr, " ✓\n");
+                if (DEBUG_LOGGING)
+                    std::fprintf(stderr, " ✓\n");
             }
             else if (type_id == 3) // RESIDUAL
             {
                 uint32_t dim1_u = 0, dim2_u = 0;
                 if (!read_u32(f, dim1_u) || !read_u32(f, dim2_u))
                 {
-                    std::fprintf(stderr, " [ERROR] Failed to read dimensions\n");
+                    if (DEBUG_LOGGING)
+                        std::fprintf(stderr, " [ERROR] Failed to read dimensions\n");
                     std::fclose(f);
                     return false;
                 }
                 int dim = static_cast<int>(dim1_u);
-                std::fprintf(stderr, " RESIDUAL %dx%d", dim, dim);
+                if (DEBUG_LOGGING)
+                    std::fprintf(stderr, " RESIDUAL %dx%d", dim, dim);
                 if (dim <= 0 || dim1_u != dim2_u)
                 {
-                    std::fprintf(stderr, " [ERROR] Invalid dimensions\n");
+                    if (DEBUG_LOGGING)
+                        std::fprintf(stderr, " [ERROR] Invalid dimensions\n");
                     std::fclose(f);
                     return false;
                 }
@@ -286,7 +322,8 @@ namespace pf
                 // Load lin1: weight[dim][dim], bias[dim]
                 if (!RB.l1.load(f, dim, dim))
                 {
-                    std::fprintf(stderr, " [ERROR] Failed to load l1\n");
+                    if (DEBUG_LOGGING)
+                        std::fprintf(stderr, " [ERROR] Failed to load l1\n");
                     std::fclose(f);
                     return false;
                 }
@@ -294,7 +331,8 @@ namespace pf
                 // Load lin2: weight[dim][dim], bias[dim]
                 if (!RB.l2.load(f, dim, dim))
                 {
-                    std::fprintf(stderr, " [ERROR] Failed to load l2\n");
+                    if (DEBUG_LOGGING)
+                        std::fprintf(stderr, " [ERROR] Failed to load l2\n");
                     std::fclose(f);
                     return false;
                 }
@@ -302,14 +340,16 @@ namespace pf
                 // Load layernorm: weight[dim], bias[dim], eps
                 if (!RB.ln.load(f, dim))
                 {
-                    std::fprintf(stderr, " [ERROR] Failed to load norm\n");
+                    if (DEBUG_LOGGING)
+                        std::fprintf(stderr, " [ERROR] Failed to load norm\n");
                     std::fclose(f);
                     return false;
                 }
                 float eps = 1e-5f;
                 if (!read_f32(f, eps))
                 {
-                    std::fprintf(stderr, " [ERROR] Failed to read eps\n");
+                    if (DEBUG_LOGGING)
+                        std::fprintf(stderr, " [ERROR] Failed to read eps\n");
                     std::fclose(f);
                     return false;
                 }
@@ -318,11 +358,13 @@ namespace pf
                 int idx = (int)residuals_.size();
                 residuals_.push_back(std::move(RB));
                 sequence_.push_back({3, idx});
-                std::fprintf(stderr, " ✓\n");
+                if (DEBUG_LOGGING)
+                    std::fprintf(stderr, " ✓\n");
             }
             else
             {
-                std::fprintf(stderr, " [ERROR] Unknown type_id: %u\n", type_id);
+                if (DEBUG_LOGGING)
+                    std::fprintf(stderr, " [ERROR] Unknown type_id: %u\n", type_id);
                 std::fclose(f);
                 return false;
             }
@@ -330,8 +372,9 @@ namespace pf
 
         std::fclose(f);
         loaded_ = true;
-        std::fprintf(stderr, "[SUCCESS] Loaded NNUE: %zu linear, %zu layernorm, %zu residual layers\n",
-                     linears_.size(), norms_.size(), residuals_.size());
+        if (DEBUG_LOGGING)
+            std::fprintf(stderr, "[SUCCESS] Loaded NNUE: %zu linear, %zu layernorm, %zu residual layers\n",
+                         linears_.size(), norms_.size(), residuals_.size());
         return true;
     }
 

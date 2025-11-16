@@ -1,6 +1,7 @@
 // Bitboard attack table initialization.
 
 #include "bitboard.h"
+#include <cstdlib>
 
 namespace pf
 {
