@@ -31,8 +31,8 @@ class SearchEngine:
         self._search: AlphaBetaSearch | None = None
 
     def _load_config(self) -> EngineConfig:
-        local_ckpt = Path(__file__).resolve().parent / "bot" / "checkpoints" / "inference006.pt"
-        hf_default = "hf://ebatu/ChessHacks-models/inference006.pt"
+        local_ckpt = Path(__file__).resolve().parent / "bot" / "checkpoints" / "matesinference009.pt"
+        hf_default = "hf://ebatu/ChessHacks-models/matesinference009.pt"
         env_checkpoint = os.getenv("CHESSBOT_CHECKPOINT")
         if env_checkpoint:
             checkpoint = env_checkpoint
