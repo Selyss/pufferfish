@@ -79,13 +79,13 @@ namespace pufferfish
     {
         // Pawn attacks
         {
-            int pawn_dir = (by == WHITE) ? SOUTH : NORTH; // Direction FROM pawn TO target
             Piece pawn = make_piece(by, PAWN);
 
-            // Check left and right pawn attack squares
+            // For WHITE to attack sq, pawn must be one rank BELOW (south) and diagonal
+            // For BLACK to attack sq, pawn must be one rank ABOVE (north) and diagonal
+            int pawn_rank = (by == WHITE) ? rank_of(sq) - 1 : rank_of(sq) + 1;
             int left_file = file_of(sq) - 1;
             int right_file = file_of(sq) + 1;
-            int pawn_rank = rank_of(sq) - pawn_dir / 8; // Rank where attacking pawn would be
 
             if (pawn_rank >= 0 && pawn_rank <= 7)
             {

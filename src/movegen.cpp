@@ -235,15 +235,12 @@ namespace pufferfish
     {
         Color us = pos.side_to_move();
         Piece our_piece = make_piece(us, pt);
-        Piece our_queen = make_piece(us, QUEEN);
 
         for (Square sq = SQ_A1; sq <= SQ_H8; sq = Square(sq + 1))
         {
             Piece p = pos.piece_on(sq);
-            if (p != our_piece && p != our_queen)
+            if (p != our_piece)
                 continue;
-            if (p == our_queen && pt != QUEEN)
-                continue; // Only generate queen moves once
 
             for (int i = 0; i < num_dirs; ++i)
             {
