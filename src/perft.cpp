@@ -136,7 +136,6 @@ namespace pufferfish
         // All pawns about to promote - stress test promotion (8 pawns * 4 promos + 5 king moves)
         {"mass promo d1", "8/PPPPPPPP/8/2k1K3/8/8/pppppppp/8 w - - 0 1", 1, 37},
         {"mass promo d2", "8/PPPPPPPP/8/2k1K3/8/8/pppppppp/8 w - - 0 1", 2, 1302},
-        {"mass promo d2", "8/PPPPPPPP/8/2k1K3/8/8/pppppppp/8 w - - 0 1", 2, 884},
 
         // Position 6 from CPW - alternative position
         {"position6 d1", "r4rk1/1pp1qppp/p1np1n2/2b1p1B1/2B1P1b1/P1NP1N2/1PP1QPPP/R4RK1 w - - 0 1", 1, 46},
