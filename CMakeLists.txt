@@ -76,6 +76,12 @@ add_executable(iterative_deepening_test apps/iterative_deepening_test.cpp)
 target_link_libraries(iterative_deepening_test PRIVATE pufferfish_core)
 
 # =============================================================================
+# Executable: nnue_loader_test
+# =============================================================================
+add_executable(nnue_loader_test apps/nnue_loader_test.cpp)
+target_link_libraries(nnue_loader_test PRIVATE pufferfish_core)
+
+# =============================================================================
 # Executable: uci_test
 # =============================================================================
 # Executable: uci_main (UCI Engine for CuteChess/Lichess)
