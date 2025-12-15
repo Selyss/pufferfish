@@ -10,6 +10,7 @@
 #include "move.h"
 #include "position.h"
 #include "transposition_table.h"
+#include "timer.h"
 #include <cstdint>
 #include <vector>
 
@@ -79,6 +80,10 @@ namespace pufferfish
         // Search for best move at given depth
         Move find_best_move(Position &pos, int depth);
 
+        // Iterative deepening search with time management
+        // Returns best move found within time limit
+        Move find_best_move_iterative(Position &pos, const SearchTimeManager &time_mgr);
+
         // Alpha-beta search (internal)
         int alpha_beta(Position &pos, int depth, int alpha, int beta);
 
@@ -102,6 +107,7 @@ namespace pufferfish
         TranspositionTable tt_;
         SearchStats stats_;
         int nodes_at_depth_ = 0;
+        Timer timer_;  // For time management
 
         // Quiet search for tactical positions (future optimization)
         int quiesce(Position &pos, int alpha, int beta);

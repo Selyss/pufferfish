@@ -237,10 +237,58 @@ namespace pufferfish
         return best_move;
     }
 
+    // =============================================================================
+    // Iterative Deepening Search
+    // =============================================================================
+
+    Move Search::find_best_move_iterative(Position &pos, const SearchTimeManager &time_mgr)
+    {
+        timer_.reset();
+        uint64_t time_limit = time_mgr.get_time_budget();
+        Move best_move;
+
+        // Handle FIXED_DEPTH mode
+        if (time_mgr.mode == SearchTimeManager::FIXED_DEPTH)
+        {
+            return find_best_move(pos, time_mgr.depth);
+        }
+
+        // Iterative deepening loop
+        for (int depth = 1; depth <= 256; ++depth)
+        {
+            // Check time before searching at this depth
+            if (timer_.time_exceeded(time_limit) && depth > 1)
+                break;  // Return result from previous depth
+
+            // Search at this depth
+            Move move_at_depth = find_best_move(pos, depth);
+
+            if (move_at_depth == Move())
+                break;  // No legal moves
+
+            best_move = move_at_depth;
+
+            // Check time after search completes
+            if (timer_.time_exceeded(time_limit))
+                break;
+
+            // Safety limit: don't go deeper than mate
+            if (stats_.max_depth >= 200)
+                break;
+        }
+
+        return best_move;
+    }
+
+    // =============================================================================
+    // Private Helper: Clear for search
+    // =============================================================================
+
     void Search::clear()
     {
         tt_.clear();
         stats_.reset();
+        timer_.reset();
     }
 
     // =============================================================================

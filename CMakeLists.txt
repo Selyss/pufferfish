@@ -39,6 +39,7 @@ add_library(pufferfish_core STATIC
     src/zobrist.cpp
     src/transposition_table.cpp
     src/search.cpp
+    src/timer.cpp
 )
 target_include_directories(pufferfish_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
@@ -65,6 +66,12 @@ target_link_libraries(transposition_table_test PRIVATE pufferfish_core)
 # =============================================================================
 add_executable(search_test apps/search_test.cpp)
 target_link_libraries(search_test PRIVATE pufferfish_core)
+
+# =============================================================================
+# Executable: iterative_deepening_test
+# =============================================================================
+add_executable(iterative_deepening_test apps/iterative_deepening_test.cpp)
+target_link_libraries(iterative_deepening_test PRIVATE pufferfish_core)
 
 # =============================================================================
 # =============================================================================
