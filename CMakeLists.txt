@@ -37,6 +37,7 @@ add_library(pufferfish_core STATIC
     src/movegen.cpp
     src/perft.cpp
     src/zobrist.cpp
+    src/transposition_table.cpp
 )
 target_include_directories(pufferfish_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
@@ -51,6 +52,12 @@ target_link_libraries(perft PRIVATE pufferfish_core)
 # =============================================================================
 add_executable(zobrist_test apps/zobrist_test.cpp)
 target_link_libraries(zobrist_test PRIVATE pufferfish_core)
+
+# =============================================================================
+# Executable: transposition_table_test
+# =============================================================================
+add_executable(transposition_table_test apps/transposition_table_test.cpp)
+target_link_libraries(transposition_table_test PRIVATE pufferfish_core)
 
 # =============================================================================
 # Tests (optional, enabled with -DBUILD_TESTS=ON)

@@ -1,8 +1,8 @@
-# Pufferfish Chess Engine - Core Rules & Zobrist Implementation
+# Pufferfish Chess Engine - Core Rules, Zobrist & Transposition Table
 
 ## Summary
 
-The Pufferfish chess engine core is complete and validated with a comprehensive test suite. This document summarizes the current state and outlines the next phases.
+The Pufferfish chess engine now has a complete and validated rules core, Zobrist hashing, and a high-performance transposition table. This document summarizes the current state and outlines the next phases.
 
 ## Completion Status
 
@@ -41,6 +41,35 @@ All functional requirements from the specification have been implemented and val
   - Make/unmake consistency: Key correctly restored after move reversal ✓
   - Uniqueness: Different positions have different keys ✓
 
+### ✅ Transposition Table (100% Complete - NEW)
+
+**Purpose:** Cache search results to avoid re-evaluating the same positions, dramatically improving search performance.
+
+**Implementation:**
+
+- **transposition_table.h/cpp**: Direct-mapped hash table with:
+  - 64-bit Zobrist key lookups (32-bit hash check for collisions)
+  - Configurable size (default 16 MB, tested up to 64 MB)
+  - Depth-aware entries (stores search depth for correctness)
+  - Bound types: EXACT, LOWER_BOUND (alpha cutoff), UPPER_BOUND (beta cutoff)
+  - Best move storage for move ordering hints
+  - Replacement strategy: Always prefer deeper searches
+
+- **Correctness Features:**
+  - Entry validity checked against current search depth
+  - Hash collision detection and reporting
+  - Statistics tracking (stores, probes, hits, collisions)
+  - Clear operation for new searches
+
+- **Testing**: 7-part test harness (`apps/transposition_table_test.exe`)
+  - Basic store/lookup ✓
+  - Depth filtering (shallow entries not used for deeper searches) ✓
+  - Replacement strategy (deeper overwrites shallower) ✓
+  - Bound types (EXACT, LOWER, UPPER) ✓
+  - Collision handling (hash collisions managed correctly) ✓
+  - Clear operation ✓
+  - Performance test (98.8% hit rate on 100k random positions with 64 MB TT) ✓
+
 ## Test Results
 
 ### Perft Test Suite (46 tests, all passing)
@@ -66,23 +95,36 @@ Make/unmake:     5/5 tests PASSED
 Uniqueness:      6/6 tests PASSED
 ```
 
+### Transposition Table Test Suite (All tests passing)
+```
+Basic store/lookup:      PASSED
+Depth filtering:         PASSED
+Replacement strategy:    PASSED
+Bound types:             PASSED
+Collision handling:      PASSED (0 collisions in 100 entries)
+Clear operation:         PASSED
+Performance (64 MB):     PASSED (98.8% hit rate on 100k entries)
+```
+
 ## Architecture
 
 ### Module Structure
 
 ```
 src/
-├── types.h              # Core enums (Color, Piece, Square, Move, CastlingRights)
-├── move.h               # Move encoding and Undo struct
-├── position.h/cpp       # Position class, FEN parsing, make/unmake
-├── attack.h/cpp         # Attack detection and king safety
-├── movegen.h/cpp        # Pseudo-legal and legal move generation
-├── perft.h/cpp          # Perft and perft divide
-└── zobrist.h/cpp        # Zobrist hashing (NEW)
+├── types.h                      # Core enums (Color, Piece, Square, Move, CastlingRights)
+├── move.h                       # Move encoding and Undo struct
+├── position.h/cpp               # Position class, FEN parsing, make/unmake
+├── attack.h/cpp                 # Attack detection and king safety
+├── movegen.h/cpp                # Pseudo-legal and legal move generation
+├── perft.h/cpp                  # Perft and perft divide
+├── zobrist.h/cpp                # Zobrist hashing
+└── transposition_table.h/cpp    # Transposition table (NEW)
 
 apps/
-├── perft_main.cpp       # Perft runner executable
-└── zobrist_test.cpp     # Zobrist unit test harness (NEW)
+├── perft_main.cpp               # Perft runner executable
+├── zobrist_test.cpp             # Zobrist unit test harness
+└── transposition_table_test.cpp # TT unit test harness (NEW)
 ```
 
 ### Key Design Decisions
@@ -90,30 +132,36 @@ apps/
 1. **Mailbox board**: Simple, intuitive, sufficient for perft and search
 2. **Incremental move generation**: Pseudo-legal first, then filter for king safety
 3. **Zobrist key maintenance**: Full recompute for correctness; incremental helpers available for search optimization
-4. **Fixed RNG seed**: Deterministic Zobrist keys for reproducibility and testing
+4. **Direct-mapped TT**: No chaining; collisions handled by hash verification and replacement strategy
+5. **Depth-aware TT entries**: Stores search depth to ensure valid reuse
+6. **Fixed RNG seed**: Deterministic Zobrist keys for reproducibility and testing
 
 ## Build Instructions
 
 ```bash
-# Build Zobrist test
-g++ -std=c++20 -I./src -o apps/zobrist_test.exe \
-    apps/zobrist_test.cpp src/position.cpp src/zobrist.cpp \
-    src/attack.cpp src/movegen.cpp src/perft.cpp
-./apps/zobrist_test.exe
+# Using CMake (Recommended)
+cd build
+cmake ..
+cmake --build .
+./zobrist_test.exe
+./transposition_table_test.exe
+./perft.exe
 
-# Build Perft runner
-g++ -std=c++20 -I./src -o apps/perft.exe \
-    apps/perft_main.cpp src/position.cpp src/zobrist.cpp \
-    src/attack.cpp src/movegen.cpp src/perft.cpp
-./apps/perft.exe
+# Manual g++ build
+g++ -std=c++20 -I./src -o transposition_table_test.exe \
+    apps/transposition_table_test.cpp src/position.cpp src/zobrist.cpp \
+    src/attack.cpp src/movegen.cpp src/perft.cpp \
+    src/transposition_table.cpp
+./transposition_table_test.exe
 ```
 
-## Next Phases (Post-Core)
+## Next Phases (Post-TT)
 
 ### Phase 1: Search & Move Ordering (Ready to Start)
-- Alpha-beta pruning with transposition tables
-- Zobrist keys already integrated for TT lookup
+- Alpha-beta pruning with transposition tables ✓ (TT ready)
+- Zobrist keys already integrated for TT lookup ✓
 - Killer move heuristics and history heuristics
+
 - Quiescence search for tactical correctness
 
 **Acceptance criteria:**
