@@ -17,7 +17,7 @@ bool test_basic_store_lookup()
 {
     std::cout << "\n=== Test 1: Basic Store/Lookup ===\n";
 
-    TranspositionTable tt(1);  // 1 MB TT
+    TranspositionTable tt(1); // 1 MB TT
 
     uint64_t key = 0x123456789ABCDEF0ULL;
     Move m = Move(SQ_E2, SQ_E4, MOVE_DOUBLE_PUSH);
@@ -33,7 +33,7 @@ bool test_basic_store_lookup()
     tt.store(key, 50, 10, BOUND_EXACT, m);
 
     // Lookup should now succeed
-    const TTEntry* entry = tt.lookup(key, 10);
+    const TTEntry *entry = tt.lookup(key, 10);
     if (entry == nullptr)
     {
         std::cout << "[FAIL] Expected entry after store\n";
@@ -100,7 +100,7 @@ bool test_replacement_strategy()
 
     // Store shallow search result
     tt.store(key, 50, 5, BOUND_EXACT, m1);
-    const TTEntry* entry1 = tt.lookup(key, 5);
+    const TTEntry *entry1 = tt.lookup(key, 5);
     if (entry1 == nullptr || entry1->best_move != m1)
     {
         std::cout << "[FAIL] Initial store failed\n";
@@ -109,7 +109,7 @@ bool test_replacement_strategy()
 
     // Store deeper search result (should replace)
     tt.store(key, 75, 10, BOUND_EXACT, m2);
-    const TTEntry* entry2 = tt.lookup(key, 10);
+    const TTEntry *entry2 = tt.lookup(key, 10);
     if (entry2 == nullptr || entry2->best_move != m2 || entry2->score != 75)
     {
         std::cout << "[FAIL] Deeper search did not replace shallow search\n";
@@ -134,10 +134,10 @@ bool test_bound_types()
         {0x3333333333333333ULL, BOUND_UPPER},
     };
 
-    for (const auto& [key, bound] : tests)
+    for (const auto &[key, bound] : tests)
     {
         tt.store(key, 100, 10, bound, m);
-        const TTEntry* entry = tt.lookup(key, 10);
+        const TTEntry *entry = tt.lookup(key, 10);
 
         if (entry == nullptr || entry->bound_type != bound)
         {
@@ -155,7 +155,7 @@ bool test_collision_handling()
 {
     std::cout << "\n=== Test 5: Collision Handling ===\n";
 
-    TranspositionTable tt(1);  // Small TT to force collisions
+    TranspositionTable tt(1); // Small TT to force collisions
     Move m = Move(SQ_E2, SQ_E4, MOVE_DOUBLE_PUSH);
 
     // Store multiple entries that might collide
@@ -166,7 +166,7 @@ bool test_collision_handling()
     }
 
     // Verify some entries are still accessible
-    const TTEntry* entry = tt.lookup(0x1234567890ABCDEFULL, 10);
+    const TTEntry *entry = tt.lookup(0x1234567890ABCDEFULL, 10);
     if (entry == nullptr)
     {
         std::cout << "[FAIL] Entry lost due to collision handling\n";
@@ -226,7 +226,7 @@ bool test_performance()
 {
     std::cout << "\n=== Test 7: Performance Test ===\n";
 
-    TranspositionTable tt(64);  // 64 MB
+    TranspositionTable tt(64); // 64 MB
     Move m = Move(SQ_E2, SQ_E4, MOVE_DOUBLE_PUSH);
 
     std::mt19937_64 rng(12345);

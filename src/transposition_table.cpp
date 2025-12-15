@@ -27,7 +27,7 @@ namespace pufferfish
         table_.resize(power_of_2);
 
         // Initialize all entries to zero (value-initialize)
-        for (auto& entry : table_)
+        for (auto &entry : table_)
         {
             entry.hash = 0;
             entry.score = 0;
@@ -42,7 +42,7 @@ namespace pufferfish
     void TranspositionTable::store(uint64_t zobrist_key, int score, int depth, BoundType bound, Move best_move)
     {
         size_t idx = hash_index(zobrist_key);
-        TTEntry& entry = table_[idx];
+        TTEntry &entry = table_[idx];
 
         // Overwrite if:
         // 1. Slot is empty (hash == 0)
@@ -50,7 +50,7 @@ namespace pufferfish
         // 3. Always overwrite shallow searches with deeper ones (replacement strategy)
         bool should_store = (entry.hash == 0) ||
                             (entry.hash == (zobrist_key & 0xFFFFFFFFULL) && depth > entry.depth) ||
-                            (depth > entry.depth);  // Always prefer deeper searches
+                            (depth > entry.depth); // Always prefer deeper searches
 
         if (should_store)
         {
@@ -67,21 +67,21 @@ namespace pufferfish
         }
     }
 
-    const TTEntry* TranspositionTable::lookup(uint64_t zobrist_key, int current_depth) const
+    const TTEntry *TranspositionTable::lookup(uint64_t zobrist_key, int current_depth) const
     {
         ++entries_probed_;
 
         size_t idx = hash_index(zobrist_key);
-        const TTEntry& entry = table_[idx];
+        const TTEntry &entry = table_[idx];
 
         if (entry.hash == 0)
-            return nullptr;  // Empty slot
+            return nullptr; // Empty slot
 
         if (!entry.matches(zobrist_key))
-            return nullptr;  // Hash collision with different position
+            return nullptr; // Hash collision with different position
 
         if (!entry.is_valid_for_depth(current_depth))
-            return nullptr;  // Entry is from shallower search
+            return nullptr; // Entry is from shallower search
 
         ++entries_hit_;
         return &entry;
@@ -89,7 +89,7 @@ namespace pufferfish
 
     void TranspositionTable::clear()
     {
-        for (auto& entry : table_)
+        for (auto &entry : table_)
         {
             entry.hash = 0;
             entry.score = 0;

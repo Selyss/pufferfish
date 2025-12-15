@@ -30,17 +30,17 @@ namespace pufferfish
     enum BoundType : uint8_t
     {
         BOUND_EXACT = 0,
-        BOUND_LOWER = 1,  // score >= value (alpha cutoff)
-        BOUND_UPPER = 2   // score <= value (beta cutoff)
+        BOUND_LOWER = 1, // score >= value (alpha cutoff)
+        BOUND_UPPER = 2  // score <= value (beta cutoff)
     };
 
     struct TTEntry
     {
-        uint32_t hash;        // Lower 32 bits of Zobrist key
-        int16_t score;        // Score in centipawns
-        uint8_t depth;        // Search depth
-        uint8_t bound_type;   // EXACT, LOWER, or UPPER
-        Move best_move;       // Best move found
+        uint32_t hash;      // Lower 32 bits of Zobrist key
+        int16_t score;      // Score in centipawns
+        uint8_t depth;      // Search depth
+        uint8_t bound_type; // EXACT, LOWER, or UPPER
+        Move best_move;     // Best move found
 
         // Check if this entry matches the given Zobrist key
         bool matches(uint64_t zobrist_key) const
@@ -78,7 +78,7 @@ namespace pufferfish
 
         // Retrieve a position evaluation from the TT
         // Returns nullptr if not found or not valid for current depth
-        const TTEntry* lookup(uint64_t zobrist_key, int current_depth) const;
+        const TTEntry *lookup(uint64_t zobrist_key, int current_depth) const;
 
         // Clear the entire transposition table
         void clear();
