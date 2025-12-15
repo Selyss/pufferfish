@@ -7,6 +7,7 @@
 #include "movegen.h"
 #include "position.h"
 #include "attack.h"
+#include <iostream>
 #include <algorithm>
 #include <cmath>
 
@@ -276,6 +277,14 @@ namespace pufferfish
                 break; // No legal moves
 
             best_move = move_at_depth;
+
+            // Output UCI info for this depth
+            uint64_t elapsed = timer_.elapsed_ms();
+            std::cout << "info depth " << depth
+                      << " nodes " << stats_.nodes_searched
+                      << " time " << elapsed
+                      << " nps " << (elapsed > 0 ? (1000 * stats_.nodes_searched / elapsed) : 0)
+                      << std::endl;
 
             // Check time after search completes
             if (timer_.time_exceeded(time_limit))
