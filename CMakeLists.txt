@@ -38,6 +38,7 @@ add_library(pufferfish_core STATIC
     src/perft.cpp
     src/zobrist.cpp
     src/transposition_table.cpp
+    src/search.cpp
 )
 target_include_directories(pufferfish_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
@@ -60,7 +61,12 @@ add_executable(transposition_table_test apps/transposition_table_test.cpp)
 target_link_libraries(transposition_table_test PRIVATE pufferfish_core)
 
 # =============================================================================
-# Tests (optional, enabled with -DBUILD_TESTS=ON)
+# Executable: search_test
+# =============================================================================
+add_executable(search_test apps/search_test.cpp)
+target_link_libraries(search_test PRIVATE pufferfish_core)
+
+# =============================================================================
 # =============================================================================
 option(BUILD_TESTS "Build unit tests" OFF)
 if(BUILD_TESTS)
