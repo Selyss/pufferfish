@@ -4,6 +4,7 @@
  */
 
 #include "position.h"
+#include "zobrist.h"
 #include <sstream>
 #include <iostream>
 #include <cstring>
@@ -18,6 +19,7 @@ namespace pufferfish
     Position::Position()
     {
         reset();
+        zobrist_key_ = compute_zobrist_key(*this);
     }
 
     void Position::clear()
@@ -28,6 +30,9 @@ namespace pufferfish
         ep_sq_ = SQ_NONE;
         halfmove_clock_ = 0;
         fullmove_ = 1;
+        king_sq_[WHITE] = SQ_NONE;
+        king_sq_[BLACK] = SQ_NONE;
+        zobrist_key_ = 0;
         king_sq_[WHITE] = SQ_NONE;
         king_sq_[BLACK] = SQ_NONE;
     }
@@ -141,7 +146,9 @@ namespace pufferfish
             fullmove_ = std::stoi(token);
         }
 
-        return is_valid();
+        bool valid = is_valid();
+        zobrist_key_ = compute_zobrist_key(*this);
+        return valid;
     }
 
     // =============================================================================
@@ -333,8 +340,9 @@ namespace pufferfish
             ++fullmove_;
         }
 
-        // Switch side to move
+        // Switch side to move and update Zobrist key
         stm_ = ~stm_;
+        zobrist_key_ = compute_zobrist_key(*this);
     }
 
     void Position::unmake_move(const Move &m, const Undo &undo)
@@ -396,6 +404,9 @@ namespace pufferfish
         {
             --fullmove_;
         }
+
+        // Recompute Zobrist key
+        zobrist_key_ = compute_zobrist_key(*this);
     }
 
     // =============================================================================

@@ -79,6 +79,11 @@ namespace pufferfish
         bool operator==(const Position &other) const;
         bool operator!=(const Position &other) const { return !(*this == other); }
 
+        // -------------------------------------------------------------------------
+        // Zobrist hashing
+        // -------------------------------------------------------------------------
+        uint64_t zobrist_key() const { return zobrist_key_; }
+
     private:
         // -------------------------------------------------------------------------
         // Internal helpers
@@ -97,6 +102,7 @@ namespace pufferfish
         int halfmove_clock_;      // Halfmove clock for 50-move rule
         int fullmove_;            // Fullmove number
         Square king_sq_[2];       // King squares indexed by color
+        uint64_t zobrist_key_;    // Zobrist hash of the position
     };
 
     // Convenience output operator

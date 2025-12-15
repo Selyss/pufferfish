@@ -36,6 +36,7 @@ add_library(pufferfish_core STATIC
     src/attack.cpp
     src/movegen.cpp
     src/perft.cpp
+    src/zobrist.cpp
 )
 target_include_directories(pufferfish_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
@@ -44,6 +45,12 @@ target_include_directories(pufferfish_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 # =============================================================================
 add_executable(perft apps/perft_main.cpp)
 target_link_libraries(perft PRIVATE pufferfish_core)
+
+# =============================================================================
+# Executable: zobrist_test
+# =============================================================================
+add_executable(zobrist_test apps/zobrist_test.cpp)
+target_link_libraries(zobrist_test PRIVATE pufferfish_core)
 
 # =============================================================================
 # Tests (optional, enabled with -DBUILD_TESTS=ON)
