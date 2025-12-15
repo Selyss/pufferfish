@@ -52,16 +52,16 @@ namespace pufferfish
         // Time limit modes
         enum Mode
         {
-            FIXED_DEPTH,           // Search to fixed depth (no time limit)
-            FIXED_TIME,            // Search for fixed amount of time
-            TIME_PER_MOVE,         // Allocate time based on clock
-            INFINITE               // Search indefinitely (for testing)
+            FIXED_DEPTH,   // Search to fixed depth (no time limit)
+            FIXED_TIME,    // Search for fixed amount of time
+            TIME_PER_MOVE, // Allocate time based on clock
+            INFINITE       // Search indefinitely (for testing)
         };
 
         Mode mode = FIXED_DEPTH;
-        int depth = 4;             // For FIXED_DEPTH mode
-        uint64_t time_ms = 0;      // For FIXED_TIME mode
-        uint64_t moves_remaining = 50;  // For TIME_PER_MOVE mode (assume game continues)
+        int depth = 4;                 // For FIXED_DEPTH mode
+        uint64_t time_ms = 0;          // For FIXED_TIME mode
+        uint64_t moves_remaining = 50; // For TIME_PER_MOVE mode (assume game continues)
 
         // Calculate time budget for this move (in ms)
         uint64_t get_time_budget() const;

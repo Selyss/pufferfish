@@ -258,13 +258,13 @@ namespace pufferfish
         {
             // Check time before searching at this depth
             if (timer_.time_exceeded(time_limit) && depth > 1)
-                break;  // Return result from previous depth
+                break; // Return result from previous depth
 
             // Search at this depth
             Move move_at_depth = find_best_move(pos, depth);
 
             if (move_at_depth == Move())
-                break;  // No legal moves
+                break; // No legal moves
 
             best_move = move_at_depth;
 

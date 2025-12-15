@@ -107,7 +107,7 @@ namespace pufferfish
         TranspositionTable tt_;
         SearchStats stats_;
         int nodes_at_depth_ = 0;
-        Timer timer_;  // For time management
+        Timer timer_; // For time management
 
         // Quiet search for tactical positions (future optimization)
         int quiesce(Position &pos, int alpha, int beta);

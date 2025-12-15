@@ -40,6 +40,7 @@ add_library(pufferfish_core STATIC
     src/transposition_table.cpp
     src/search.cpp
     src/timer.cpp
+    src/uci.cpp
 )
 target_include_directories(pufferfish_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
@@ -72,6 +73,12 @@ target_link_libraries(search_test PRIVATE pufferfish_core)
 # =============================================================================
 add_executable(iterative_deepening_test apps/iterative_deepening_test.cpp)
 target_link_libraries(iterative_deepening_test PRIVATE pufferfish_core)
+
+# =============================================================================
+# Executable: uci_test
+# =============================================================================
+add_executable(uci_test apps/uci_test.cpp)
+target_link_libraries(uci_test PRIVATE pufferfish_core)
 
 # =============================================================================
 # =============================================================================

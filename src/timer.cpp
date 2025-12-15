@@ -57,14 +57,14 @@ namespace pufferfish
         switch (mode)
         {
         case FIXED_DEPTH:
-            return UINT64_MAX;  // No time limit for depth-based search
+            return UINT64_MAX; // No time limit for depth-based search
         case FIXED_TIME:
             return time_ms;
         case TIME_PER_MOVE:
             // Allocate 1/moves_remaining of remaining clock
             // For now, simple heuristic: allocate a fraction of time
             if (moves_remaining == 0)
-                return 1000;  // Fallback: 1 second
+                return 1000; // Fallback: 1 second
             return std::max(1ULL, (1000ULL / static_cast<uint64_t>(moves_remaining)));
         case INFINITE:
             return UINT64_MAX;
