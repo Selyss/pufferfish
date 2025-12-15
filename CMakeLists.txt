@@ -78,6 +78,14 @@ target_link_libraries(iterative_deepening_test PRIVATE pufferfish_core)
 # =============================================================================
 # Executable: uci_test
 # =============================================================================
+# Executable: uci_main (UCI Engine for CuteChess/Lichess)
+# =============================================================================
+add_executable(pufferfish apps/uci_main.cpp)
+target_link_libraries(pufferfish PRIVATE pufferfish_core)
+
+# =============================================================================
+# Executable: uci_test (UCI Protocol Tests)
+# =============================================================================
 add_executable(uci_test apps/uci_test.cpp)
 target_link_libraries(uci_test PRIVATE pufferfish_core)
 
