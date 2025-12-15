@@ -14,9 +14,11 @@ namespace pufferfish
 {
 
     Search::Search(size_t tt_size_mb)
-        : tt_(tt_size_mb)
+        : tt_(tt_size_mb), nnue_(std::make_unique<NNUEEvaluator>())
     {
         stats_.reset();
+        // Try to load NNUE weights
+        nnue_->load("models/nnue_residual.bin");
     }
 
     // =============================================================================
@@ -28,6 +30,13 @@ namespace pufferfish
 
     int Search::evaluate(const Position &pos)
     {
+        // Use NNUE if available
+        if (nnue_ && nnue_->is_ready())
+        {
+            return nnue_->evaluate(pos);
+        }
+
+        // Fallback to material counting
         int score = 0;
 
         // Material counting (in centipawns)

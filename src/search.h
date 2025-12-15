@@ -11,8 +11,10 @@
 #include "position.h"
 #include "transposition_table.h"
 #include "timer.h"
+#include "nnue.h"
 #include <cstdint>
 #include <vector>
+#include <memory>
 
 namespace pufferfish
 {
@@ -87,8 +89,8 @@ namespace pufferfish
         // Alpha-beta search (internal)
         int alpha_beta(Position &pos, int depth, int alpha, int beta);
 
-        // Simple evaluation function
-        static int evaluate(const Position &pos);
+        // Simple evaluation function (uses NNUE if available)
+        int evaluate(const Position &pos);
 
         // Mate detection
         static bool is_mating_score(int score);
@@ -107,7 +109,8 @@ namespace pufferfish
         TranspositionTable tt_;
         SearchStats stats_;
         int nodes_at_depth_ = 0;
-        Timer timer_; // For time management
+        Timer timer_;                         // For time management
+        std::unique_ptr<NNUEEvaluator> nnue_; // Neural network evaluator
 
         // Quiet search for tactical positions (future optimization)
         int quiesce(Position &pos, int alpha, int beta);

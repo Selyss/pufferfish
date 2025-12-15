@@ -41,6 +41,7 @@ add_library(pufferfish_core STATIC
     src/search.cpp
     src/timer.cpp
     src/uci.cpp
+    src/nnue.cpp
 )
 target_include_directories(pufferfish_core PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
