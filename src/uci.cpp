@@ -92,6 +92,17 @@ namespace pufferfish
     {
         std::cout << "id name Pufferfish" << std::endl;
         std::cout << "id author Development Team" << std::endl;
+
+        // Check NNUE status
+        if (search_.nnue_ready())
+        {
+            std::cout << "info string NNUE loaded successfully" << std::endl;
+        }
+        else
+        {
+            std::cout << "info string NNUE not loaded - using material evaluation" << std::endl;
+        }
+
         // TODO: Add options (e.g., hash size, threads)
         std::cout << "uciok" << std::endl;
     }

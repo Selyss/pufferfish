@@ -105,6 +105,9 @@ namespace pufferfish
         // Direct access to TT (for debugging/testing)
         TranspositionTable &tt() { return tt_; }
 
+        // Check if NNUE is loaded and ready
+        bool nnue_ready() const { return nnue_ && nnue_->is_ready(); }
+
     private:
         TranspositionTable tt_;
         SearchStats stats_;

@@ -10,6 +10,7 @@
 #include <iostream>
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 
 namespace pufferfish
 {
@@ -18,8 +19,25 @@ namespace pufferfish
         : tt_(tt_size_mb), nnue_(std::make_unique<NNUEEvaluator>())
     {
         stats_.reset();
-        // Try to load NNUE weights
-        nnue_->load("models/nnue_residual.bin");
+
+        // Try to load NNUE weights from multiple possible locations
+        const std::vector<std::string> nnue_paths = {
+            "models/nnue_residual.bin",       // Relative from build dir
+            "../models/nnue_residual.bin",    // One level up
+            "../../models/nnue_residual.bin", // Two levels up
+            "./nnue_residual.bin",            // Current dir
+        };
+
+        for (const auto &path : nnue_paths)
+        {
+            if (std::filesystem::exists(path))
+            {
+                if (nnue_->load(path))
+                {
+                    break; // Successfully loaded
+                }
+            }
+        }
     }
 
     // =============================================================================
