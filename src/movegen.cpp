@@ -190,6 +190,7 @@ namespace pufferfish
         {
             // White kingside
             if ((rights & WHITE_OO) &&
+                king_sq == SQ_E1 && pos.piece_on(SQ_H1) == W_ROOK &&
                 pos.is_empty(SQ_F1) && pos.is_empty(SQ_G1) &&
                 !is_square_attacked(pos, SQ_E1, them) &&
                 !is_square_attacked(pos, SQ_F1, them) &&
@@ -199,6 +200,7 @@ namespace pufferfish
             }
             // White queenside
             if ((rights & WHITE_OOO) &&
+                king_sq == SQ_E1 && pos.piece_on(SQ_A1) == W_ROOK &&
                 pos.is_empty(SQ_D1) && pos.is_empty(SQ_C1) && pos.is_empty(SQ_B1) &&
                 !is_square_attacked(pos, SQ_E1, them) &&
                 !is_square_attacked(pos, SQ_D1, them) &&
@@ -211,6 +213,7 @@ namespace pufferfish
         {
             // Black kingside
             if ((rights & BLACK_OO) &&
+                king_sq == SQ_E8 && pos.piece_on(SQ_H8) == B_ROOK &&
                 pos.is_empty(SQ_F8) && pos.is_empty(SQ_G8) &&
                 !is_square_attacked(pos, SQ_E8, them) &&
                 !is_square_attacked(pos, SQ_F8, them) &&
@@ -220,6 +223,7 @@ namespace pufferfish
             }
             // Black queenside
             if ((rights & BLACK_OOO) &&
+                king_sq == SQ_E8 && pos.piece_on(SQ_A8) == B_ROOK &&
                 pos.is_empty(SQ_D8) && pos.is_empty(SQ_C8) && pos.is_empty(SQ_B8) &&
                 !is_square_attacked(pos, SQ_E8, them) &&
                 !is_square_attacked(pos, SQ_D8, them) &&

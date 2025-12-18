@@ -477,6 +477,15 @@ namespace pufferfish
         if (king_sq_[WHITE] != wk_sq || king_sq_[BLACK] != bk_sq)
             return false;
 
+        // Pawns cannot exist on rank 1 or rank 8 in a valid position.
+        for (int file = FILE_A; file <= FILE_H; ++file)
+        {
+            const Square sq1 = make_square(file, RANK_1);
+            const Square sq8 = make_square(file, RANK_8);
+            if (type_of(board_[sq1]) == PAWN || type_of(board_[sq8]) == PAWN)
+                return false;
+        }
+
         // Check en passant square validity
         if (ep_sq_ != SQ_NONE)
         {
