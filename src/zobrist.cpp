@@ -74,9 +74,7 @@ namespace pufferfish
             Piece p = pos.piece_on(sq);
             if (p != NO_PIECE)
             {
-                // Map piece to zobrist index (0-11)
-                // Pieces: WHITE_PAWN=0, WHITE_KNIGHT=1, ..., WHITE_KING=5, BLACK_PAWN=6, ...
-                key ^= z.piece[p][sq];
+                key ^= z.piece[zobrist_piece_index(p)][sq];
             }
         }
 

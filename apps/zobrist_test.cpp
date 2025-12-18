@@ -24,8 +24,9 @@ bool test_zobrist_determinism()
 
     std::vector<ZobristTest> tests = {
         {"startpos", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"},
-        {"empty board", "8/8/8/8/8/8/8/8 w - - 0 1"},
-        {"with ep square", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq e3 0 1"},
+        {"kings only", "4k3/8/8/8/8/8/8/4K3 w - - 0 1"},
+        // Valid ep-square example (after 1.e4 e5, white to move, ep square = e6)
+        {"with ep square", "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2"},
         {"limited castling", "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQ - 0 1"},
     };
 
@@ -33,8 +34,13 @@ bool test_zobrist_determinism()
     for (const auto &test : tests)
     {
         Position pos1, pos2;
-        pos1.set_fen(test.fen);
-        pos2.set_fen(test.fen);
+        if (!pos1.set_fen(test.fen) || !pos2.set_fen(test.fen))
+        {
+            std::cout << "[FAIL] " << std::left << std::setw(20) << test.name
+                      << " set_fen() failed\n";
+            all_pass = false;
+            continue;
+        }
 
         uint64_t key1 = pos1.zobrist_key();
         uint64_t key2 = pos2.zobrist_key();
@@ -56,7 +62,11 @@ bool test_zobrist_make_unmake()
     std::cout << "\n=== Test 2: Zobrist Make/Unmake Consistency ===\n";
 
     Position pos;
-    pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    if (!pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"))
+    {
+        std::cout << "[FAIL] set_fen() failed for startpos\n";
+        return false;
+    }
 
     // Generate and play first move
     std::vector<Move> moves;
@@ -110,8 +120,12 @@ bool test_zobrist_uniqueness()
         for (size_t j = i + 1; j < positions.size(); ++j)
         {
             Position pos1, pos2;
-            pos1.set_fen(positions[i]);
-            pos2.set_fen(positions[j]);
+            if (!pos1.set_fen(positions[i]) || !pos2.set_fen(positions[j]))
+            {
+                std::cout << "[FAIL] set_fen() failed for uniqueness test\n";
+                all_pass = false;
+                continue;
+            }
 
             uint64_t key1 = pos1.zobrist_key();
             uint64_t key2 = pos2.zobrist_key();

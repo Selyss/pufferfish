@@ -14,6 +14,20 @@ namespace pufferfish
 
     class Position;
 
+    // Map Piece enum values to dense [0..11] indices for Zobrist piece tables.
+    //  0..5  = white pawn..king
+    //  6..11 = black pawn..king
+    inline int zobrist_piece_index(Piece p)
+    {
+        assert(p != NO_PIECE);
+        if (p >= W_PAWN && p <= W_KING)
+            return int(p) - int(W_PAWN);
+        if (p >= B_PAWN && p <= B_KING)
+            return 6 + (int(p) - int(B_PAWN));
+        assert(false && "Invalid Piece value for zobrist");
+        return 0;
+    }
+
     // =============================================================================
     // Zobrist Hashing
     // =============================================================================
@@ -29,7 +43,7 @@ namespace pufferfish
     struct Zobrist
     {
         // Piece keys: indexed as [piece_type][square]
-        // piece_type 0 = pawn, 1 = knight, ..., 5 = king (6 types, white/black separate)
+        // piece_type is a dense [0..11] index (see zobrist_piece_index()).
         uint64_t piece[12][64];
 
         // Castling rights keys: indexed as [castling_bitmask]
@@ -56,21 +70,24 @@ namespace pufferfish
     inline uint64_t update_piece_move(uint64_t key, Piece moving, Square from, Square to)
     {
         const Zobrist &z = zobrist();
-        key ^= z.piece[moving][from]; // Remove from source
-        key ^= z.piece[moving][to];   // Add to destination
+        const int idx = zobrist_piece_index(moving);
+        key ^= z.piece[idx][from]; // Remove from source
+        key ^= z.piece[idx][to];   // Add to destination
         return key;
     }
 
     // Update key when a piece is placed
     inline uint64_t update_piece_placed(uint64_t key, Piece p, Square sq)
     {
-        return key ^ zobrist().piece[p][sq];
+        const int idx = zobrist_piece_index(p);
+        return key ^ zobrist().piece[idx][sq];
     }
 
     // Update key when a piece is removed
     inline uint64_t update_piece_removed(uint64_t key, Piece p, Square sq)
     {
-        return key ^ zobrist().piece[p][sq];
+        const int idx = zobrist_piece_index(p);
+        return key ^ zobrist().piece[idx][sq];
     }
 
     // Update key for castling rights change
