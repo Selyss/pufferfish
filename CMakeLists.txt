@@ -108,6 +108,18 @@ add_executable(zobrist_incremental_test apps/zobrist_incremental_test.cpp)
 target_link_libraries(zobrist_incremental_test PRIVATE pufferfish_core)
 
 # =============================================================================
+# Executable: pawn_rank_validity_test
+# =============================================================================
+add_executable(pawn_rank_validity_test apps/pawn_rank_validity_test.cpp)
+target_link_libraries(pawn_rank_validity_test PRIVATE pufferfish_core)
+
+# =============================================================================
+# Executable: castling_legality_test
+# =============================================================================
+add_executable(castling_legality_test apps/castling_legality_test.cpp)
+target_link_libraries(castling_legality_test PRIVATE pufferfish_core)
+
+# =============================================================================
 # =============================================================================
 option(BUILD_TESTS "Build unit tests" OFF)
 if(BUILD_TESTS)
