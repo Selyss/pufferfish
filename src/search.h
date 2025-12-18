@@ -90,7 +90,7 @@ namespace pufferfish
         int alpha_beta(Position &pos, int depth, int alpha, int beta);
 
         // Simple evaluation function (uses NNUE if available)
-        int evaluate(const Position &pos);
+        int evaluate(Position &pos);
 
         // Mate detection
         static bool is_mating_score(int score);

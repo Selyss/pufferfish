@@ -1,229 +1,33 @@
 /*
  * Pufferfish Chess Engine
- * NNUE Implementation - Residual Neural Network Utility Evaluation
- *
- * Loads binary NNUE models exported from PyTorch via export_int16.py
- * Supports LINEAR, LAYERNORM, and RESIDUAL layer types
+ * NNUE Implementation - Quantized accumulator (train_modal.py architecture)
  */
 
 #include "nnue.h"
 #include "types.h"
-#include <fstream>
-#include <cstring>
 #include <algorithm>
-#include <cmath>
+#include <fstream>
 #include <iostream>
-#include <sstream>
-
-using pufferfish::file_of;
+#include <limits>
 
 namespace pufferfish
 {
+    NNUEEvaluator::NNUEEvaluator() : ready_(false) {}
 
-    // =============================================================================
-    // Linear Layer Implementation
-    // =============================================================================
-
-    void NNUEEvaluator::LinearLayer::forward(const std::vector<float> &input, std::vector<float> &output)
+    static bool read_exact(std::ifstream &file, void *buffer, size_t bytes)
     {
-        output.assign(out_dim, 0.0f);
-
-        // Matrix multiply: output = input @ weights^T + bias
-        for (int i = 0; i < out_dim; i++)
-        {
-            float sum = bias[i];
-            for (int j = 0; j < in_dim; j++)
-            {
-                sum += input[j] * weights[i * in_dim + j];
-            }
-
-            if (apply_relu)
-            {
-                output[i] = std::max(0.0f, sum);
-            }
-            else
-            {
-                output[i] = sum;
-            }
-        }
+        file.read(reinterpret_cast<char *>(buffer), static_cast<std::streamsize>(bytes));
+        return !file.fail();
     }
 
-    // =============================================================================
-    // LayerNorm Implementation
-    // =============================================================================
-
-    void NNUEEvaluator::LayerNormLayer::forward(const std::vector<float> &input, std::vector<float> &output)
+    int32_t NNUEEvaluator::clamp_int32(int64_t value)
     {
-        output.assign(size, 0.0f);
-
-        // Compute mean
-        float mean = 0.0f;
-        for (int i = 0; i < size; i++)
-        {
-            mean += input[i];
-        }
-        mean /= size;
-
-        // Compute variance
-        float variance = 0.0f;
-        for (int i = 0; i < size; i++)
-        {
-            float diff = input[i] - mean;
-            variance += diff * diff;
-        }
-        variance /= size;
-
-        // Normalize and apply affine transform: γ * (x - μ) / sqrt(σ² + ε) + β
-        float inv_std = 1.0f / std::sqrt(variance + eps);
-        for (int i = 0; i < size; i++)
-        {
-            output[i] = weight[i] * (input[i] - mean) * inv_std + bias[i];
-        }
+        if (value > std::numeric_limits<int32_t>::max())
+            return std::numeric_limits<int32_t>::max();
+        if (value < std::numeric_limits<int32_t>::min())
+            return std::numeric_limits<int32_t>::min();
+        return static_cast<int32_t>(value);
     }
-
-    // =============================================================================
-    // Residual Block Implementation
-    // =============================================================================
-
-    void NNUEEvaluator::ResidualBlock::forward(const std::vector<float> &input, std::vector<float> &output)
-    {
-        output.assign(dim, 0.0f);
-        std::vector<float> temp(dim);
-
-        // Apply first linear layer with ReLU: y = ReLU(lin1(x))
-        for (int i = 0; i < dim; i++)
-        {
-            float sum = lin1_bias[i];
-            for (int j = 0; j < dim; j++)
-            {
-                sum += input[j] * lin1_weight[i * dim + j];
-            }
-            temp[i] = std::max(0.0f, sum);
-        }
-
-        // Apply second linear layer without activation: y = lin2(y)
-        std::vector<float> lin2_out(dim);
-        for (int i = 0; i < dim; i++)
-        {
-            float sum = lin2_bias[i];
-            for (int j = 0; j < dim; j++)
-            {
-                sum += temp[j] * lin2_weight[i * dim + j];
-            }
-            lin2_out[i] = sum;
-        }
-
-        // Add residual connection: residual + lin2_out
-        for (int i = 0; i < dim; i++)
-        {
-            temp[i] = input[i] + lin2_out[i];
-        }
-
-        // Apply layer norm
-        float mean = 0.0f;
-        for (int i = 0; i < dim; i++)
-        {
-            mean += temp[i];
-        }
-        mean /= dim;
-
-        float variance = 0.0f;
-        for (int i = 0; i < dim; i++)
-        {
-            float diff = temp[i] - mean;
-            variance += diff * diff;
-        }
-        variance /= dim;
-
-        float inv_std = 1.0f / std::sqrt(variance + norm_eps);
-        std::vector<float> norm_out(dim);
-        for (int i = 0; i < dim; i++)
-        {
-            norm_out[i] = norm_weight[i] * (temp[i] - mean) * inv_std + norm_bias[i];
-        }
-
-        // Apply final ReLU: output = ReLU(norm(residual + lin2))
-        for (int i = 0; i < dim; i++)
-        {
-            output[i] = std::max(0.0f, norm_out[i]);
-        }
-    }
-
-    // =============================================================================
-    // Simple JSON Parser for NNUE header
-    // =============================================================================
-
-    static int parse_json_int(const std::string &json, const std::string &key)
-    {
-        std::string search = "\"" + key + "\"";
-        size_t pos = json.find(search);
-        if (pos == std::string::npos)
-            return -1;
-
-        pos += search.length();
-        // Skip to colon and whitespace
-        while (pos < json.length() && json[pos] != ':')
-            pos++;
-        if (pos >= json.length())
-            return -1;
-        pos++; // Skip colon
-
-        // Skip whitespace
-        while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t'))
-            pos++;
-
-        // Parse integer (may be negative, may be part of array)
-        size_t end = pos;
-        if (end < json.length() && json[end] == '-')
-            end++; // Handle negative numbers
-        while (end < json.length() && std::isdigit(json[end]))
-            end++;
-
-        if (end == pos || (json[pos] == '-' && end == pos + 1))
-            return -1;
-
-        return std::stoi(json.substr(pos, end - pos));
-    }
-
-    static std::string parse_json_string(const std::string &json, const std::string &key)
-    {
-        std::string search = "\"" + key + "\"";
-        size_t pos = json.find(search);
-        if (pos == std::string::npos)
-            return "";
-
-        pos += search.length();
-        // Skip to colon
-        while (pos < json.length() && json[pos] != ':')
-            pos++;
-        if (pos >= json.length())
-            return "";
-        pos++; // Skip colon
-
-        // Skip whitespace
-        while (pos < json.length() && (json[pos] == ' ' || json[pos] == '\t'))
-            pos++;
-
-        // Expect opening quote
-        if (pos >= json.length() || json[pos] != '"')
-            return "";
-        pos++;
-
-        // Find closing quote
-        size_t end = json.find("\"", pos);
-        if (end == std::string::npos)
-            return "";
-
-        return json.substr(pos, end - pos);
-    }
-
-    // =============================================================================
-    // NNUEEvaluator - Public Interface
-    // =============================================================================
-
-    NNUEEvaluator::NNUEEvaluator() : current_input_dim_(INPUT_DIM), ready_(false) {}
-
-    NNUEEvaluator::~NNUEEvaluator() {}
 
     bool NNUEEvaluator::load(const std::string &filename)
     {
@@ -234,380 +38,291 @@ namespace pufferfish
             return false;
         }
 
-        try
+        Weights w;
+        int32_t header[4] = {0, 0, 0, 0};
+        if (!read_exact(file, header, sizeof(header)))
         {
-            // Read JSON header length
-            uint32_t json_len = 0;
-            file.read(reinterpret_cast<char *>(&json_len), sizeof(uint32_t));
-            if (file.fail() || json_len == 0 || json_len > 10000)
-            {
-                std::cerr << "[NNUE] Error: Invalid JSON header length: " << json_len << std::endl;
-                return false;
-            }
-
-            // Read JSON metadata
-            std::vector<char> json_buffer(json_len);
-            file.read(json_buffer.data(), json_len);
-            if (file.fail())
-            {
-                std::cerr << "[NNUE] Error: Failed to read JSON header" << std::endl;
-                return false;
-            }
-
-            std::string json_str(json_buffer.begin(), json_buffer.end());
-
-            // Parse JSON manually (simple key-value extraction)
-            std::string format = parse_json_string(json_str, "format");
-            int input_dim = parse_json_int(json_str, "input_dim");
-            int layer_count = parse_json_int(json_str, "layer_count");
-
-            // Validate format
-            if (format != "residual-nnue-v1")
-            {
-                std::cerr << "[NNUE] Error: Unsupported format: " << format << std::endl;
-                return false;
-            }
-
-            if (input_dim < 0)
-                input_dim = 795; // Default
-
-            if (layer_count <= 0)
-            {
-                std::cerr << "[NNUE] Error: Invalid layer count: " << layer_count << std::endl;
-                return false;
-            }
-
-            if (input_dim != INPUT_DIM)
-            {
-                std::cerr << "[NNUE] Warning: Expected input_dim=" << INPUT_DIM
-                          << " but file has " << input_dim << std::endl;
-            }
-
-            std::cout << "[NNUE] Loading model: format=" << format
-                      << ", input_dim=" << input_dim
-                      << ", layers=" << layer_count << std::endl;
-
-            // Read layer count from file
-            uint32_t file_layer_count = 0;
-            file.read(reinterpret_cast<char *>(&file_layer_count), sizeof(uint32_t));
-            if (file.fail())
-            {
-                std::cerr << "[NNUE] Error: Failed to read layer count" << std::endl;
-                return false;
-            }
-
-            if (static_cast<int>(file_layer_count) != layer_count)
-            {
-                std::cerr << "[NNUE] Warning: Metadata says " << layer_count
-                          << " layers but file has " << file_layer_count << std::endl;
-            }
-
-            layers_.clear();
-
-            // Read each layer
-            for (uint32_t layer_idx = 0; layer_idx < file_layer_count; layer_idx++)
-            {
-                uint32_t type_id = 0;
-                file.read(reinterpret_cast<char *>(&type_id), sizeof(uint32_t));
-                if (file.fail())
-                {
-                    std::cerr << "[NNUE] Error: Failed to read layer type at layer " << layer_idx << std::endl;
-                    return false;
-                }
-
-                LayerType type = static_cast<LayerType>(type_id);
-
-                if (type == LayerType::LINEAR)
-                {
-                    uint32_t out_dim = 0, in_dim = 0;
-                    file.read(reinterpret_cast<char *>(&out_dim), sizeof(uint32_t));
-                    file.read(reinterpret_cast<char *>(&in_dim), sizeof(uint32_t));
-
-                    if (file.fail())
-                    {
-                        std::cerr << "[NNUE] Error: Failed to read LINEAR layer dimensions" << std::endl;
-                        return false;
-                    }
-
-                    auto linear = std::make_unique<LinearLayer>();
-                    linear->in_dim = in_dim;
-                    linear->out_dim = out_dim;
-                    linear->apply_relu = (layer_idx < file_layer_count - 1); // ReLU for all but last
-
-                    // Read weights: [out_dim][in_dim]
-                    linear->weights.resize(out_dim * in_dim);
-                    file.read(reinterpret_cast<char *>(linear->weights.data()),
-                              out_dim * in_dim * sizeof(float));
-
-                    // Read bias: [out_dim]
-                    linear->bias.resize(out_dim);
-                    file.read(reinterpret_cast<char *>(linear->bias.data()),
-                              out_dim * sizeof(float));
-
-                    if (file.fail())
-                    {
-                        std::cerr << "[NNUE] Error: Failed to read LINEAR layer weights/bias" << std::endl;
-                        return false;
-                    }
-
-                    std::cout << "[NNUE] Layer " << layer_idx << ": LINEAR "
-                              << in_dim << " -> " << out_dim
-                              << " (ReLU: " << linear->apply_relu << ")" << std::endl;
-
-                    layers_.push_back(std::move(linear));
-                    current_input_dim_ = out_dim;
-                }
-                else if (type == LayerType::LAYERNORM)
-                {
-                    uint32_t size = 0, padding = 0;
-                    file.read(reinterpret_cast<char *>(&size), sizeof(uint32_t));
-                    file.read(reinterpret_cast<char *>(&padding), sizeof(uint32_t));
-
-                    auto layernorm = std::make_unique<LayerNormLayer>();
-                    layernorm->size = size;
-
-                    // Read weight (γ): [size]
-                    layernorm->weight.resize(size);
-                    file.read(reinterpret_cast<char *>(layernorm->weight.data()),
-                              size * sizeof(float));
-
-                    // Read bias (β): [size]
-                    layernorm->bias.resize(size);
-                    file.read(reinterpret_cast<char *>(layernorm->bias.data()),
-                              size * sizeof(float));
-
-                    // Read epsilon
-                    file.read(reinterpret_cast<char *>(&layernorm->eps), sizeof(float));
-
-                    if (file.fail())
-                    {
-                        std::cerr << "[NNUE] Error: Failed to read LAYERNORM layer" << std::endl;
-                        return false;
-                    }
-
-                    std::cout << "[NNUE] Layer " << layer_idx << ": LAYERNORM " << size << std::endl;
-
-                    layers_.push_back(std::move(layernorm));
-                }
-                else if (type == LayerType::RESIDUAL)
-                {
-                    uint32_t dim1 = 0, dim2 = 0;
-                    file.read(reinterpret_cast<char *>(&dim1), sizeof(uint32_t));
-                    file.read(reinterpret_cast<char *>(&dim2), sizeof(uint32_t));
-
-                    if (dim1 != dim2)
-                    {
-                        std::cerr << "[NNUE] Error: RESIDUAL block dimensions mismatch: "
-                                  << dim1 << " != " << dim2 << std::endl;
-                        return false;
-                    }
-
-                    auto residual = std::make_unique<ResidualBlock>();
-                    residual->dim = dim1;
-
-                    // Read lin1 weights and bias
-                    residual->lin1_weight.resize(dim1 * dim1);
-                    file.read(reinterpret_cast<char *>(residual->lin1_weight.data()),
-                              dim1 * dim1 * sizeof(float));
-
-                    residual->lin1_bias.resize(dim1);
-                    file.read(reinterpret_cast<char *>(residual->lin1_bias.data()),
-                              dim1 * sizeof(float));
-
-                    // Read lin2 weights and bias
-                    residual->lin2_weight.resize(dim1 * dim1);
-                    file.read(reinterpret_cast<char *>(residual->lin2_weight.data()),
-                              dim1 * dim1 * sizeof(float));
-
-                    residual->lin2_bias.resize(dim1);
-                    file.read(reinterpret_cast<char *>(residual->lin2_bias.data()),
-                              dim1 * sizeof(float));
-
-                    // Read norm weights and bias
-                    residual->norm_weight.resize(dim1);
-                    file.read(reinterpret_cast<char *>(residual->norm_weight.data()),
-                              dim1 * sizeof(float));
-
-                    residual->norm_bias.resize(dim1);
-                    file.read(reinterpret_cast<char *>(residual->norm_bias.data()),
-                              dim1 * sizeof(float));
-
-                    // Read norm epsilon
-                    file.read(reinterpret_cast<char *>(&residual->norm_eps), sizeof(float));
-
-                    if (file.fail())
-                    {
-                        std::cerr << "[NNUE] Error: Failed to read RESIDUAL block" << std::endl;
-                        return false;
-                    }
-
-                    std::cout << "[NNUE] Layer " << layer_idx << ": RESIDUAL " << dim1 << "x" << dim1 << std::endl;
-
-                    layers_.push_back(std::move(residual));
-                }
-                else
-                {
-                    std::cerr << "[NNUE] Error: Unknown layer type: " << type_id << std::endl;
-                    return false;
-                }
-            }
-
-            file.close();
-            ready_ = true;
-
-            std::cout << "[NNUE] Successfully loaded " << layers_.size() << " layers" << std::endl;
-            return true;
-        }
-        catch (const std::exception &e)
-        {
-            std::cerr << "[NNUE] Error: Exception while loading: " << e.what() << std::endl;
+            std::cerr << "[NNUE] Error: Failed to read header" << std::endl;
             return false;
         }
-    }
 
-    // =============================================================================
-    // Feature Encoding
-    // =============================================================================
+        w.feature_dim = header[0];
+        w.acc_units = header[1];
+        w.hidden1 = header[2];
+        w.hidden2 = header[3];
 
-    void NNUEEvaluator::add_piece_features(const Position &pos, std::vector<float> &features)
-    {
-        // Piece placement features: 12 piece types × 64 squares
-        // Index: piece_type * 64 + square
-        // Piece types: wP=0, wN=1, wB=2, wR=3, wQ=4, wK=5, bP=6, bN=7, bB=8, bR=9, bQ=10, bK=11
-
-        for (Square sq = 0; sq < 64; sq++)
+        if (w.feature_dim != NNUE_FEATURE_DIM || w.acc_units != NNUE_ACC_UNITS ||
+            w.hidden1 != NNUE_HIDDEN1 || w.hidden2 != NNUE_HIDDEN2)
         {
-            Piece piece = pos.piece_on(sq);
-            if (piece == NO_PIECE)
-                continue;
+            std::cerr << "[NNUE] Error: Model dimensions mismatch. "
+                      << "Expected (" << NNUE_FEATURE_DIM << "," << NNUE_ACC_UNITS << ","
+                      << NNUE_HIDDEN1 << "," << NNUE_HIDDEN2 << ") but got ("
+                      << w.feature_dim << "," << w.acc_units << ","
+                      << w.hidden1 << "," << w.hidden2 << ")" << std::endl;
+            return false;
+        }
 
-            int piece_idx = static_cast<int>(piece) - 1; // 0-11
-            int feature_idx = piece_idx * 64 + sq;
+        w.acc_f_bias.resize(w.acc_units);
+        w.acc_e_bias.resize(w.acc_units);
+        if (!read_exact(file, w.acc_f_bias.data(), w.acc_units * sizeof(int32_t)) ||
+            !read_exact(file, w.acc_e_bias.data(), w.acc_units * sizeof(int32_t)))
+        {
+            std::cerr << "[NNUE] Error: Failed to read accumulator biases" << std::endl;
+            return false;
+        }
 
-            if (feature_idx >= 0 && feature_idx < 768)
+        const size_t acc_weights_size = static_cast<size_t>(w.feature_dim) * w.acc_units;
+        w.acc_f_weights.resize(acc_weights_size);
+        w.acc_e_weights.resize(acc_weights_size);
+
+        for (int f = 0; f < w.feature_dim; ++f)
+        {
+            int16_t *f_base = w.acc_f_weights.data() + static_cast<size_t>(f) * w.acc_units;
+            int16_t *e_base = w.acc_e_weights.data() + static_cast<size_t>(f) * w.acc_units;
+            if (!read_exact(file, f_base, w.acc_units * sizeof(int16_t)) ||
+                !read_exact(file, e_base, w.acc_units * sizeof(int16_t)))
             {
-                features[feature_idx] = 1.0f;
-            }
-        }
-    }
-
-    void NNUEEvaluator::add_board_state_features(const Position &pos, std::vector<float> &features)
-    {
-        // Features 768+ (27 additional features for total of 795)
-        // [768] material, [769] phase, [770] side, [771-774] castling (4), [775-782] ep_file (8), [783-794] reserved (12)
-
-        // Feature 768: Material balance
-        float material = 0.0f;
-        for (Square sq = 0; sq < 64; sq++)
-        {
-            Piece piece = pos.piece_on(sq);
-            if (piece == NO_PIECE)
-                continue;
-
-            int piece_type = piece & 7;              // 1-6 for pawn-king
-            float values[] = {0, 1, 3, 3, 5, 9, 0};  // pawn, knight, bishop, rook, queen, king, dummy
-            float sign = (piece & 8) ? -1.0f : 1.0f; // black pieces negative
-            material += sign * values[piece_type];
-        }
-        features[768] = std::tanh(material / 40.0f);
-
-        // Feature 769: Game phase
-        int piece_count = 0;
-        for (Square sq = 0; sq < 64; sq++)
-        {
-            if (pos.piece_on(sq) != NO_PIECE)
-                piece_count++;
-        }
-        features[769] = 1.0f - (piece_count / 32.0f);
-
-        // Feature 770: Side to move
-        features[770] = (pos.side_to_move() == WHITE) ? 1.0f : 0.0f;
-
-        // Features 771-774: Castling rights (4 features)
-        CastlingRights cr = pos.castling_rights();
-        features[771] = (cr & WHITE_OO) ? 1.0f : 0.0f;
-        features[772] = (cr & WHITE_OOO) ? 1.0f : 0.0f;
-        features[773] = (cr & BLACK_OO) ? 1.0f : 0.0f;
-        features[774] = (cr & BLACK_OOO) ? 1.0f : 0.0f;
-
-        // Features 775-782: En passant file (8 features) - all zeros by default
-        // Set only if ep square is valid
-        Square ep_sq = pos.ep_square();
-        if (ep_sq != SQ_NONE)
-        {
-            int file = file_of(ep_sq); // Extract file (0-7)
-            if (file >= 0 && file < 8)
-            {
-                features[775 + file] = 1.0f;
+                std::cerr << "[NNUE] Error: Failed to read accumulator weights" << std::endl;
+                return false;
             }
         }
 
-        // Features 783-794: reserved/unused (all zeros)
-    }
-
-    void NNUEEvaluator::encode_position(const Position &pos, std::vector<float> &features)
-    {
-        features.assign(INPUT_DIM, 0.0f);
-        add_piece_features(pos, features);
-        add_board_state_features(pos, features);
-    }
-
-    // =============================================================================
-    // Forward Pass
-    // =============================================================================
-
-    void NNUEEvaluator::forward(const std::vector<float> &input, std::vector<float> &output)
-    {
-        std::vector<float> current = input;
-
-        for (size_t i = 0; i < layers_.size(); i++)
+        w.fc1_bias.resize(w.hidden1);
+        w.fc1_weights.resize(static_cast<size_t>(w.hidden1) * (2 * w.acc_units));
+        if (!read_exact(file, w.fc1_bias.data(), w.hidden1 * sizeof(int32_t)) ||
+            !read_exact(file, w.fc1_weights.data(), w.fc1_weights.size() * sizeof(int16_t)))
         {
-            std::vector<float> next;
-            layers_[i]->forward(current, next);
-            current = std::move(next);
+            std::cerr << "[NNUE] Error: Failed to read fc1 weights" << std::endl;
+            return false;
         }
 
-        output = current;
+        w.fc2_bias.resize(w.hidden2);
+        w.fc2_weights.resize(static_cast<size_t>(w.hidden2) * w.hidden1);
+        if (!read_exact(file, w.fc2_bias.data(), w.hidden2 * sizeof(int32_t)) ||
+            !read_exact(file, w.fc2_weights.data(), w.fc2_weights.size() * sizeof(int16_t)))
+        {
+            std::cerr << "[NNUE] Error: Failed to read fc2 weights" << std::endl;
+            return false;
+        }
+
+        if (!read_exact(file, &w.out_bias, sizeof(int32_t)))
+        {
+            std::cerr << "[NNUE] Error: Failed to read output bias" << std::endl;
+            return false;
+        }
+
+        w.out_weights.resize(w.hidden2);
+        if (!read_exact(file, w.out_weights.data(), w.hidden2 * sizeof(int16_t)))
+        {
+            std::cerr << "[NNUE] Error: Failed to read output weights" << std::endl;
+            return false;
+        }
+
+        weights_ = std::move(w);
+        ready_ = true;
+
+        std::cout << "[NNUE] Loaded model: features=" << weights_.feature_dim
+                  << ", acc_units=" << weights_.acc_units
+                  << ", hidden1=" << weights_.hidden1
+                  << ", hidden2=" << weights_.hidden2 << std::endl;
+        return true;
     }
 
-    // =============================================================================
-    // Evaluation
-    // =============================================================================
+    int NNUEEvaluator::piece_offset(Piece p)
+    {
+        if (p == NO_PIECE)
+            return -1;
+        PieceType pt = type_of(p);
+        if (pt == NO_PIECE_TYPE)
+            return -1;
+        int offset = (static_cast<int>(pt) - 1);
+        if (color_of(p) == BLACK)
+            offset += 6;
+        return (offset >= 0 && offset < 12) ? offset : -1;
+    }
 
-    int NNUEEvaluator::evaluate(const Position &pos)
+    int NNUEEvaluator::feature_index(Piece p, Square sq)
+    {
+        if (!is_valid_square(sq))
+            return -1;
+        int offset = piece_offset(p);
+        if (offset < 0)
+            return -1;
+        return static_cast<int>(sq) * 12 + offset;
+    }
+
+    void NNUEEvaluator::apply_feature_delta(Position &pos, int feature_idx, int delta) const
+    {
+        if (feature_idx < 0 || feature_idx >= weights_.feature_dim)
+            return;
+
+        int32_t *acc_f = pos.nnue_acc_friendly_.data();
+        int32_t *acc_e = pos.nnue_acc_enemy_.data();
+
+        const int16_t *w_f = weights_.acc_f_weights.data() +
+                             static_cast<size_t>(feature_idx) * weights_.acc_units;
+        const int16_t *w_e = weights_.acc_e_weights.data() +
+                             static_cast<size_t>(feature_idx) * weights_.acc_units;
+
+        for (int i = 0; i < weights_.acc_units; ++i)
+        {
+            acc_f[i] += static_cast<int32_t>(delta) * w_f[i];
+            acc_e[i] += static_cast<int32_t>(delta) * w_e[i];
+        }
+    }
+
+    void NNUEEvaluator::refresh_accumulator(Position &pos) const
     {
         if (!ready_)
+            return;
+
+        std::copy(weights_.acc_f_bias.begin(), weights_.acc_f_bias.end(),
+                  pos.nnue_acc_friendly_.begin());
+        std::copy(weights_.acc_e_bias.begin(), weights_.acc_e_bias.end(),
+                  pos.nnue_acc_enemy_.begin());
+
+        for (Square sq = SQ_A1; sq <= SQ_H8; ++sq)
         {
-            return 0;
+            Piece p = pos.piece_on(sq);
+            if (p == NO_PIECE)
+                continue;
+            int idx = feature_index(p, sq);
+            apply_feature_delta(pos, idx, 1);
         }
 
-        std::vector<float> features;
-        encode_position(pos, features);
+        pos.nnue_acc_valid_ = true;
+    }
 
-        std::vector<float> output;
-        forward(features, output);
+    void NNUEEvaluator::update_after_move(Position &pos, const Move &m, const Undo &undo) const
+    {
+        if (!ready_)
+            return;
 
-        if (output.empty())
+        if (!undo.nnue_acc_valid)
         {
-            return 0;
+            refresh_accumulator(pos);
+            return;
         }
 
-        // Network outputs a single float value
-        float raw_score = output[0];
+        Color us = ~pos.side_to_move();
+        Square from = m.from();
+        Square to = m.to();
 
-        // Convert to centipawns: multiply by 100 and ensure it's in reasonable range
-        int cp_score = static_cast<int>(std::round(raw_score * 100.0f));
+        Piece moving_piece = NO_PIECE;
+        if (m.is_promotion())
+        {
+            moving_piece = make_piece(us, PAWN);
+        }
+        else if (m.is_castle())
+        {
+            moving_piece = make_piece(us, KING);
+        }
+        else
+        {
+            moving_piece = pos.piece_on(to);
+        }
 
-        // Clamp to reasonable range (±10000 cp = ±100 pawns)
-        cp_score = std::max(-10000, std::min(10000, cp_score));
+        apply_feature_delta(pos, feature_index(moving_piece, from), -1);
 
-        // Flip perspective if black to move
+        if (m.is_capture() && undo.captured != NO_PIECE)
+        {
+            apply_feature_delta(pos, feature_index(undo.captured, undo.captured_sq), -1);
+        }
+
+        Piece placed_piece = moving_piece;
+        if (m.is_promotion())
+        {
+            placed_piece = make_piece(us, m.promotion_type());
+        }
+
+        apply_feature_delta(pos, feature_index(placed_piece, to), 1);
+
+        if (m.is_castle())
+        {
+            Square rook_from = SQ_NONE;
+            Square rook_to = SQ_NONE;
+            if (m.flag() == MOVE_CASTLE_K)
+            {
+                rook_from = (us == WHITE) ? SQ_H1 : SQ_H8;
+                rook_to = (us == WHITE) ? SQ_F1 : SQ_F8;
+            }
+            else
+            {
+                rook_from = (us == WHITE) ? SQ_A1 : SQ_A8;
+                rook_to = (us == WHITE) ? SQ_D1 : SQ_D8;
+            }
+
+            Piece rook = make_piece(us, ROOK);
+            apply_feature_delta(pos, feature_index(rook, rook_from), -1);
+            apply_feature_delta(pos, feature_index(rook, rook_to), 1);
+        }
+
+        pos.nnue_acc_valid_ = true;
+    }
+
+    int NNUEEvaluator::evaluate(Position &pos) const
+    {
+        if (!ready_)
+            return 0;
+
+        if (!pos.nnue_acc_valid_)
+        {
+            refresh_accumulator(pos);
+        }
+
+        std::vector<int32_t> acc_f(weights_.acc_units);
+        std::vector<int32_t> acc_e(weights_.acc_units);
+
+        for (int i = 0; i < weights_.acc_units; ++i)
+        {
+            acc_f[i] = relu(pos.nnue_acc_friendly_[i]);
+            acc_e[i] = relu(pos.nnue_acc_enemy_[i]);
+        }
+
+        std::vector<int32_t> fc1_out(weights_.hidden1);
+        const int in1 = 2 * weights_.acc_units;
+
+        for (int i = 0; i < weights_.hidden1; ++i)
+        {
+            int64_t sum = weights_.fc1_bias[i];
+            const int16_t *w_row = weights_.fc1_weights.data() + static_cast<size_t>(i) * in1;
+            for (int j = 0; j < weights_.acc_units; ++j)
+            {
+                sum += static_cast<int64_t>(w_row[j]) * acc_f[j];
+            }
+            for (int j = 0; j < weights_.acc_units; ++j)
+            {
+                sum += static_cast<int64_t>(w_row[j + weights_.acc_units]) * acc_e[j];
+            }
+            fc1_out[i] = relu(clamp_int32(sum));
+        }
+
+        std::vector<int32_t> fc2_out(weights_.hidden2);
+        for (int i = 0; i < weights_.hidden2; ++i)
+        {
+            int64_t sum = weights_.fc2_bias[i];
+            const int16_t *w_row = weights_.fc2_weights.data() + static_cast<size_t>(i) * weights_.hidden1;
+            for (int j = 0; j < weights_.hidden1; ++j)
+            {
+                sum += static_cast<int64_t>(w_row[j]) * fc1_out[j];
+            }
+            fc2_out[i] = relu(clamp_int32(sum));
+        }
+
+        int64_t out_sum = weights_.out_bias;
+        for (int i = 0; i < weights_.hidden2; ++i)
+        {
+            out_sum += static_cast<int64_t>(weights_.out_weights[i]) * fc2_out[i];
+        }
+
+        int32_t score = clamp_int32(out_sum);
+
         if (pos.side_to_move() == BLACK)
         {
-            cp_score = -cp_score;
+            score = -score;
         }
 
-        return cp_score;
+        return score;
     }
 
 } // namespace pufferfish

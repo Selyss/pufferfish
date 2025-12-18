@@ -8,6 +8,8 @@
 
 #include "types.h"
 #include "move.h"
+#include "nnue_defs.h"
+#include <array>
 #include <string>
 #include <iostream>
 
@@ -85,6 +87,8 @@ namespace pufferfish
         uint64_t zobrist_key() const { return zobrist_key_; }
 
     private:
+        friend class NNUEEvaluator;
+
         // -------------------------------------------------------------------------
         // Internal helpers
         // -------------------------------------------------------------------------
@@ -103,6 +107,9 @@ namespace pufferfish
         int fullmove_;            // Fullmove number
         Square king_sq_[2];       // King squares indexed by color
         uint64_t zobrist_key_;    // Zobrist hash of the position
+        std::array<int32_t, NNUE_ACC_UNITS> nnue_acc_friendly_;
+        std::array<int32_t, NNUE_ACC_UNITS> nnue_acc_enemy_;
+        bool nnue_acc_valid_;
     };
 
     // Convenience output operator

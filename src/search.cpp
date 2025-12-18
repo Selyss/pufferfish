@@ -22,10 +22,10 @@ namespace pufferfish
 
         // Try to load NNUE weights from multiple possible locations
         const std::vector<std::string> nnue_paths = {
-            "models/nnue_residual.bin",       // Relative from build dir
-            "../models/nnue_residual.bin",    // One level up
-            "../../models/nnue_residual.bin", // Two levels up
-            "./nnue_residual.bin",            // Current dir
+            "models/nnue_weights.bin",       // Relative from build dir
+            "../models/nnue_weights.bin",    // One level up
+            "../../models/nnue_weights.bin", // Two levels up
+            "./nnue_weights.bin",            // Current dir
         };
 
         for (const auto &path : nnue_paths)
@@ -47,7 +47,7 @@ namespace pufferfish
     // Positive = side to move is better
     // Negative = opponent is better
 
-    int Search::evaluate(const Position &pos)
+    int Search::evaluate(Position &pos)
     {
         // Use NNUE if available
         if (nnue_ && nnue_->is_ready())
@@ -196,6 +196,10 @@ namespace pufferfish
         {
             Undo undo;
             pos.make_move(m, undo);
+            if (nnue_ && nnue_->is_ready())
+            {
+                nnue_->update_after_move(pos, m, undo);
+            }
             int score = -alpha_beta(pos, depth - 1, -beta, -alpha);
             pos.unmake_move(m, undo);
 
@@ -237,6 +241,10 @@ namespace pufferfish
 
         stats_.reset();
         tt_.clear();
+        if (nnue_ && nnue_->is_ready())
+        {
+            nnue_->refresh_accumulator(pos);
+        }
 
         // Root node search with move tracking
         std::vector<Move> moves;
@@ -252,6 +260,10 @@ namespace pufferfish
         {
             Undo undo;
             pos.make_move(m, undo);
+            if (nnue_ && nnue_->is_ready())
+            {
+                nnue_->update_after_move(pos, m, undo);
+            }
             int score = -alpha_beta(pos, depth - 1, -INF, INF);
             pos.unmake_move(m, undo);
 
@@ -274,6 +286,10 @@ namespace pufferfish
         timer_.reset();
         uint64_t time_limit = time_mgr.get_time_budget();
         Move best_move;
+        if (nnue_ && nnue_->is_ready())
+        {
+            nnue_->refresh_accumulator(pos);
+        }
 
         // Handle FIXED_DEPTH mode
         if (time_mgr.mode == SearchTimeManager::FIXED_DEPTH)

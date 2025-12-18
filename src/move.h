@@ -7,6 +7,8 @@
 #define PUFFERFISH_MOVE_H
 
 #include "types.h"
+#include "nnue_defs.h"
+#include <array>
 #include <string>
 
 namespace pufferfish
@@ -131,9 +133,13 @@ namespace pufferfish
         Square ep_square;        // Previous en passant square
         int halfmove_clock;      // Previous halfmove clock
         Square king_sq[2];       // Previous king squares [WHITE, BLACK]
+        std::array<int32_t, NNUE_ACC_UNITS> nnue_acc_friendly;
+        std::array<int32_t, NNUE_ACC_UNITS> nnue_acc_enemy;
+        bool nnue_acc_valid;
 
         Undo() : captured(NO_PIECE), captured_sq(SQ_NONE),
-                 castling(NO_CASTLING), ep_square(SQ_NONE), halfmove_clock(0)
+                 castling(NO_CASTLING), ep_square(SQ_NONE), halfmove_clock(0),
+                 nnue_acc_friendly{}, nnue_acc_enemy{}, nnue_acc_valid(false)
         {
             king_sq[WHITE] = SQ_NONE;
             king_sq[BLACK] = SQ_NONE;

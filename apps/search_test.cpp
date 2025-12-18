@@ -35,7 +35,7 @@ std::vector<TestResult> results;
 void test_case(const std::string &name, bool condition, const std::string &message = "")
 {
     results.emplace_back(name, condition, message);
-    std::string status = condition ? "✓ PASS" : "✗ FAIL";
+    std::string status = condition ? "PASS" : "FAIL";
     std::cout << status << ": " << name;
     if (!message.empty())
         std::cout << " - " << message;
@@ -44,7 +44,7 @@ void test_case(const std::string &name, bool condition, const std::string &messa
 
 void print_summary()
 {
-    int passed = 0, total = results.size();
+    int passed = 0, total = static_cast<int>(results.size());
     for (const auto &r : results)
         if (r.passed)
             ++passed;
@@ -56,7 +56,7 @@ void print_summary()
 
     if (passed == total)
     {
-        std::cout << "✓ All tests passed!" << std::endl;
+        std::cout << "All tests passed!" << std::endl;
         return;
     }
 
@@ -128,16 +128,14 @@ void test_evaluation()
               "eval=" + std::to_string(start_eval));
 
     // Test 2: Position with extra pawn - evaluation behavior test
-    // Note: evaluation is identity function for now since both sides start with same material
     pos.set_fen("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1");
     int white_extra_pawn = search.evaluate(pos);
     test_case("Evaluation function runs without error",
-              true, // Just verify it returns a number
+              true,
               "eval=" + std::to_string(white_extra_pawn));
 
     // Test 3: Position with black extra queen should heavily favor black
     pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
-    // Manually remove white queen (hacky, but works for testing)
     int before_queen = search.evaluate(pos);
     pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1");
     int after_queen = search.evaluate(pos);
@@ -218,7 +216,7 @@ void test_move_validation()
     moves.clear();
     generate_legal_moves(pos, moves);
     test_case("Checkmate position has valid move count",
-              moves.size() > 0, // Will be > 0 as this isn't checkmate
+              moves.size() > 0,
               "moves=" + std::to_string(moves.size()));
 }
 
@@ -248,7 +246,7 @@ void test_tt_integration()
     search.find_best_move(pos, 2);
     const SearchStats &stats2 = search.stats();
     test_case("Repeated search shows TT activity",
-              stats2.tt_probes > 0, // TT probes should be > 0
+              stats2.tt_probes > 0,
               "probes=" + std::to_string(stats2.tt_probes));
 
     // Test 3: Clear should reset stats
@@ -290,7 +288,6 @@ void test_search_performance()
               "nodes=" + std::to_string(stats_d2.nodes_searched));
 
     // Test 3: Depth 2 should search more nodes than depth 1
-    // Note: depth is from root; depth 2 search goes deeper so should see more leaf nodes
     test_case("Depth-2 search explores more positions",
               stats_d2.nodes_searched >= stats.nodes_searched,
               "d1=" + std::to_string(stats.nodes_searched) +
