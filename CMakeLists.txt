@@ -102,6 +102,12 @@ add_executable(fen_validity_test apps/fen_validity_test.cpp)
 target_link_libraries(fen_validity_test PRIVATE pufferfish_core)
 
 # =============================================================================
+# Executable: zobrist_incremental_test
+# =============================================================================
+add_executable(zobrist_incremental_test apps/zobrist_incremental_test.cpp)
+target_link_libraries(zobrist_incremental_test PRIVATE pufferfish_core)
+
+# =============================================================================
 # =============================================================================
 option(BUILD_TESTS "Build unit tests" OFF)
 if(BUILD_TESTS)
