@@ -96,6 +96,12 @@ add_executable(uci_test apps/uci_test.cpp)
 target_link_libraries(uci_test PRIVATE pufferfish_core)
 
 # =============================================================================
+# Executable: fen_validity_test
+# =============================================================================
+add_executable(fen_validity_test apps/fen_validity_test.cpp)
+target_link_libraries(fen_validity_test PRIVATE pufferfish_core)
+
+# =============================================================================
 # =============================================================================
 option(BUILD_TESTS "Build unit tests" OFF)
 if(BUILD_TESTS)
