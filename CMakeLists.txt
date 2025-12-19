@@ -120,6 +120,12 @@ add_executable(castling_legality_test apps/castling_legality_test.cpp)
 target_link_libraries(castling_legality_test PRIVATE pufferfish_core)
 
 # =============================================================================
+# Executable: root_score_dump
+# =============================================================================
+add_executable(root_score_dump apps/root_score_dump.cpp)
+target_link_libraries(root_score_dump PRIVATE pufferfish_core)
+
+# =============================================================================
 # =============================================================================
 option(BUILD_TESTS "Build unit tests" OFF)
 if(BUILD_TESTS)
