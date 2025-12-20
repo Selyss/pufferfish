@@ -61,8 +61,9 @@ namespace pufferfish
         case FIXED_TIME:
             return time_ms;
         case TIME_PER_MOVE:
-            // Allocate 1/moves_remaining of remaining clock
-            // For now, simple heuristic: allocate a fraction of time
+            // Use the precomputed budget when available.
+            if (time_ms > 0)
+                return time_ms;
             if (moves_remaining == 0)
                 return 1000; // Fallback: 1 second
             return std::max(1ULL, (1000ULL / static_cast<uint64_t>(moves_remaining)));

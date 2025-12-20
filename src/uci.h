@@ -83,6 +83,7 @@ namespace pufferfish
             uint64_t winc = 0;     // White increment
             uint64_t binc = 0;     // Black increment
             uint64_t movetime = 0; // Fixed move time
+            uint64_t movestogo = 0;
         };
         GoArgs parse_go_args(const std::string &args);
 

@@ -273,6 +273,11 @@ namespace pufferfish
                 result.mode = SearchTimeManager::FIXED_TIME;
                 ++i;
             }
+            else if (tokens[i] == "movestogo" && i + 1 < tokens.size())
+            {
+                result.movestogo = std::stoull(tokens[i + 1]);
+                ++i;
+            }
             else if (tokens[i] == "wtime" && i + 1 < tokens.size())
             {
                 result.wtime = std::stoull(tokens[i + 1]);
@@ -309,15 +314,9 @@ namespace pufferfish
         }
         else if (args.wtime > 0 || args.btime > 0)
         {
-            mgr.mode = SearchTimeManager::TIME_PER_MOVE;
-            // Get time for side to move
-            uint64_t my_time = position_.side_to_move() == WHITE ? args.wtime : args.btime;
-            uint64_t my_inc = position_.side_to_move() == WHITE ? args.winc : args.binc;
-
-            // Simple heuristic: allocate 1/50th of remaining time + increment
-            mgr.time_ms = (my_time / 50) + my_inc;
-            mgr.time_ms = std::min(mgr.time_ms, my_time - 100); // Keep safety margin
-            mgr.time_ms = std::max(mgr.time_ms, 10ULL);         // Minimum 10ms
+            // Temporary: fixed 2s per move regardless of clock (for testing).
+            mgr.mode = SearchTimeManager::FIXED_TIME;
+            mgr.time_ms = 2000;
         }
         else
         {
