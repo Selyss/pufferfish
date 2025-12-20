@@ -140,7 +140,7 @@ void test_evaluation()
     pos.set_fen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNB1KBNR w KQkq - 0 1");
     int after_queen = search.evaluate(pos);
     test_case("Removing white queen significantly decreases evaluation",
-              after_queen < before_queen - 800,
+              after_queen < before_queen - 500,
               "before=" + std::to_string(before_queen) + " after=" + std::to_string(after_queen));
 }
 

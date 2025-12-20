@@ -140,10 +140,12 @@ namespace pufferfish
         // Transposition table lookup
         uint64_t zobrist = pos.zobrist_key();
         const TTEntry *tt_entry = tt_.lookup(zobrist, depth);
+        Move tt_move;
 
         if (tt_entry != nullptr)
         {
             ++stats_.tt_hits;
+            tt_move = tt_entry->best_move;
             // Use TT score if it's valid for this node
             int tt_score = static_cast<int>(tt_entry->score);
             if (tt_entry->bound_type == BOUND_EXACT)
@@ -194,6 +196,24 @@ namespace pufferfish
         int best_score = NEG_INF;
         Move best_move;
         BoundType bound_type = BOUND_UPPER;
+
+        // Move ordering: TT move first, then captures/promotions.
+        auto move_score = [&](const Move &m) -> int {
+            if (!tt_move.is_none() && m == tt_move)
+                return 1000000;
+            int score = 0;
+            if (m.is_capture())
+                score += 100000;
+            if (m.is_promotion())
+                score += 50000;
+            if (m.is_castle())
+                score += 1000;
+            return score;
+        };
+
+        std::stable_sort(moves.begin(), moves.end(),
+                         [&](const Move &a, const Move &b)
+                         { return move_score(a) > move_score(b); });
 
         // Try each move
         for (const Move &m : moves)
@@ -256,6 +276,28 @@ namespace pufferfish
 
         if (moves.empty())
             return Move(); // No legal moves
+
+        // Move ordering: prefer TT move and captures at root.
+        Move tt_move;
+        if (const TTEntry *tt_entry = tt_.lookup(pos.zobrist_key(), depth))
+            tt_move = tt_entry->best_move;
+
+        auto move_score = [&](const Move &m) -> int {
+            if (!tt_move.is_none() && m == tt_move)
+                return 1000000;
+            int score = 0;
+            if (m.is_capture())
+                score += 100000;
+            if (m.is_promotion())
+                score += 50000;
+            if (m.is_castle())
+                score += 1000;
+            return score;
+        };
+
+        std::stable_sort(moves.begin(), moves.end(),
+                         [&](const Move &a, const Move &b)
+                         { return move_score(a) > move_score(b); });
 
         Move best_move = moves[0];
         int best_score = NEG_INF;
