@@ -8,6 +8,7 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <cctype>
 
 namespace pufferfish
 {
@@ -77,7 +78,11 @@ namespace pufferfish
         }
         else if (cmd == "setoption")
         {
-            // TODO: Implement option handling (e.g., hash size)
+            // Get remaining args after "setoption"
+            std::string args;
+            if (line.length() > 10)
+                args = line.substr(10); // Skip "setoption "
+            handle_setoption(args);
         }
         // Silently ignore unknown commands
 
@@ -92,6 +97,8 @@ namespace pufferfish
     {
         std::cout << "id name Pufferfish" << std::endl;
         std::cout << "id author Development Team" << std::endl;
+
+        std::cout << "option name UseNNUE type check default true" << std::endl;
 
         // Check NNUE status
         if (search_.nnue_ready())
@@ -190,6 +197,57 @@ namespace pufferfish
         running_ = false;
     }
 
+    void UCIHandler::handle_setoption(const std::string &args)
+    {
+        std::vector<std::string> tokens = split(args);
+        std::string name;
+        std::string value;
+        bool seen_value = false;
+
+        for (size_t i = 0; i < tokens.size(); ++i)
+        {
+            if (tokens[i] == "name")
+            {
+                ++i;
+                while (i < tokens.size() && tokens[i] != "value")
+                {
+                    if (!name.empty())
+                        name += " ";
+                    name += tokens[i];
+                    ++i;
+                }
+                if (i < tokens.size() && tokens[i] == "value")
+                {
+                    seen_value = true;
+                }
+            }
+            if (tokens[i] == "value")
+            {
+                ++i;
+                while (i < tokens.size())
+                {
+                    if (!value.empty())
+                        value += " ";
+                    value += tokens[i];
+                    ++i;
+                }
+                break;
+            }
+        }
+
+        if (!seen_value)
+            return;
+
+        std::string name_lc = to_lower(name);
+        std::string value_lc = to_lower(value);
+
+        if (name_lc == "usennue")
+        {
+            bool enabled = (value_lc == "true" || value_lc == "1" || value_lc == "on");
+            use_nnue_option_ = enabled;
+            search_.set_use_nnue(enabled);
+        }
+    }
     // =============================================================================
     // Helper Functions
     // =============================================================================
@@ -204,6 +262,14 @@ namespace pufferfish
             result.push_back(word);
         }
         return result;
+    }
+
+    std::string UCIHandler::to_lower(std::string s)
+    {
+        std::transform(s.begin(), s.end(), s.begin(),
+                       [](unsigned char c)
+                       { return static_cast<char>(std::tolower(c)); });
+        return s;
     }
 
     UCIHandler::PositionArgs UCIHandler::parse_position_args(const std::string &args)

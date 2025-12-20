@@ -106,7 +106,10 @@ namespace pufferfish
         TranspositionTable &tt() { return tt_; }
 
         // Check if NNUE is loaded and ready
-        bool nnue_ready() const { return nnue_ && nnue_->is_ready(); }
+        bool nnue_ready() const { return use_nnue_ && nnue_ && nnue_->is_ready(); }
+
+        void set_use_nnue(bool enabled) { use_nnue_ = enabled; }
+        bool use_nnue() const { return use_nnue_; }
 
     private:
         TranspositionTable tt_;
@@ -116,6 +119,7 @@ namespace pufferfish
         std::unique_ptr<NNUEEvaluator> nnue_; // Neural network evaluator
         uint64_t time_limit_ms_ = 0;
         bool time_stop_ = false;
+        bool use_nnue_ = true;
 
         Move find_best_move_internal(Position &pos, int depth);
 

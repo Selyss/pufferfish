@@ -95,7 +95,7 @@ namespace pufferfish
     int Search::evaluate(Position &pos)
     {
         // Use NNUE if available
-        if (nnue_ && nnue_->is_ready())
+        if (use_nnue_ && nnue_ && nnue_->is_ready())
         {
             return nnue_->evaluate(pos);
         }

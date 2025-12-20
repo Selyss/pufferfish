@@ -55,6 +55,7 @@ namespace pufferfish
         Position position_;
         Search search_;
         bool running_ = true;
+        bool use_nnue_option_ = true;
 
         // Command handlers
         void handle_uci();
@@ -63,6 +64,7 @@ namespace pufferfish
         void handle_go(const std::string &args);
         void handle_stop();
         void handle_quit();
+        void handle_setoption(const std::string &args);
 
         // Helper: Parse position command arguments
         struct PositionArgs
@@ -92,6 +94,9 @@ namespace pufferfish
 
         // Helper: Split string by spaces
         std::vector<std::string> split(const std::string &s);
+
+        // Helper: Lowercase a string
+        static std::string to_lower(std::string s);
     };
 
 } // namespace pufferfish
