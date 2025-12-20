@@ -1,13 +1,12 @@
 /*
  * Pufferfish Chess Engine
- * NNUE Evaluation - Quantized accumulator (train_modal.py architecture)
+ * NNUE Evaluation - Residual NNUE loader (export_int16.py format)
  */
 
 #ifndef PUFFERFISH_NNUE_H
 #define PUFFERFISH_NNUE_H
 
 #include "position.h"
-#include "nnue_defs.h"
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -19,53 +18,58 @@ namespace pufferfish
     public:
         NNUEEvaluator();
 
-        // Load NNUE weights from binary file (export_int16.py format).
+        // Load NNUE weights from binary file (training/export_int16.py format).
         bool load(const std::string &filename);
 
         // Evaluate a position using the neural network.
         // Returns score in centipawns (positive = advantage for side to move).
         int evaluate(Position &pos) const;
 
-        // Update accumulator after a move is made (incremental update).
+        // Incremental hooks (no-op for residual NNUE; evaluation recomputes features).
         void update_after_move(Position &pos, const Move &m, const Undo &undo) const;
-
-        // Recompute accumulator from scratch for the current position.
         void refresh_accumulator(Position &pos) const;
 
         bool is_ready() const { return ready_; }
 
     private:
-        struct Weights
+        enum LayerType
         {
-            int feature_dim = 0;
-            int acc_units = 0;
-            int hidden1 = 0;
-            int hidden2 = 0;
-
-            std::vector<int32_t> acc_f_bias;
-            std::vector<int32_t> acc_e_bias;
-            std::vector<int16_t> acc_f_weights; // [feature_dim][acc_units]
-            std::vector<int16_t> acc_e_weights; // [feature_dim][acc_units]
-
-            std::vector<int32_t> fc1_bias;
-            std::vector<int16_t> fc1_weights; // [hidden1][2*acc_units]
-            std::vector<int32_t> fc2_bias;
-            std::vector<int16_t> fc2_weights; // [hidden2][hidden1]
-
-            int32_t out_bias = 0;
-            std::vector<int16_t> out_weights; // [hidden2]
+            LAYER_LINEAR = 1,
+            LAYER_LAYERNORM = 2,
+            LAYER_RESIDUAL = 3,
+            LAYER_COMPACT_RESIDUAL = 4
         };
 
-        Weights weights_;
-        bool ready_;
+        struct Layer
+        {
+            LayerType type = LAYER_LINEAR;
+            int in = 0;
+            int out = 0;
+            int dim = 0;
+            float eps = 0.0f;
+            bool has_norm = false;
+            std::vector<float> weights;
+            std::vector<float> bias;
+            std::vector<float> w1, b1, w2, b2;
+            std::vector<float> norm_w, norm_b;
+        };
 
+        bool ready_ = false;
+        int input_dim_ = 0;
+        std::vector<Layer> layers_;
+
+        // Feature encoding (matches dataset.FenFeatureEncoder)
+        void encode_features(const Position &pos, std::vector<float> &features) const;
+
+        // Helpers
+        static float relu(float x) { return x > 0.0f ? x : 0.0f; }
+        static void layernorm(std::vector<float> &x, const std::vector<float> &w,
+                              const std::vector<float> &b, float eps);
+        static float dot_row(const float *row, const std::vector<float> &x, int n);
         static int piece_offset(Piece p);
-        static int feature_index(Piece p, Square sq);
-        void apply_feature_delta(Position &pos, int feature_idx, int delta) const;
-        static int32_t relu(int32_t x) { return x > 0 ? x : 0; }
-        static int32_t clamp_int32(int64_t value);
     };
 
 } // namespace pufferfish
 
 #endif // PUFFERFISH_NNUE_H
+

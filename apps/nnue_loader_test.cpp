@@ -17,8 +17,8 @@ int main()
     std::cout << "NNUEEvaluator created" << std::endl;
     std::cout << "  Status: " << (nnue.is_ready() ? "ready" : "not ready") << std::endl;
 
-    std::cout << "\nLoading nnue_weights.bin..." << std::endl;
-    if (!nnue.load("models/nnue_weights.bin"))
+    std::cout << "\nLoading nnue_residual.bin..." << std::endl;
+    if (!nnue.load("models/nnue_residual.bin"))
     {
         std::cerr << "Failed to load model" << std::endl;
         return 1;

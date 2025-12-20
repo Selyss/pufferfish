@@ -22,10 +22,14 @@ namespace pufferfish
 
         // Try to load NNUE weights from multiple possible locations
         const std::vector<std::string> nnue_paths = {
-            "models/nnue_weights.bin",       // Relative from build dir
-            "../models/nnue_weights.bin",    // One level up
-            "../../models/nnue_weights.bin", // Two levels up
-            "./nnue_weights.bin",            // Current dir
+            "models/nnue_residual.bin",       // Preferred export name
+            "models/nnue_weights.bin",        // Legacy name
+            "../models/nnue_residual.bin",    // One level up
+            "../models/nnue_weights.bin",
+            "../../models/nnue_residual.bin", // Two levels up
+            "../../models/nnue_weights.bin",
+            "./nnue_residual.bin",            // Current dir
+            "./nnue_weights.bin",
         };
 
         for (const auto &path : nnue_paths)
