@@ -66,6 +66,8 @@ namespace pufferfish
         // -------------------------------------------------------------------------
         void make_move(const Move &m, Undo &undo);
         void unmake_move(const Move &m, const Undo &undo);
+        void make_null_move(Undo &undo);
+        void unmake_null_move(const Undo &undo);
 
         // -------------------------------------------------------------------------
         // Debug and display

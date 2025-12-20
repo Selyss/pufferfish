@@ -343,18 +343,28 @@ namespace pufferfish
         }
     }
 
-    void generate_captures(const Position &pos, std::vector<Move> &moves)
+    void generate_captures(Position &pos, std::vector<Move> &moves)
     {
-        std::vector<Move> all_moves;
-        generate_pseudo_moves(pos, all_moves);
+        std::vector<Move> pseudo;
+        generate_pseudo_moves(pos, pseudo);
 
         moves.clear();
-        for (const Move &m : all_moves)
+        moves.reserve(pseudo.size());
+
+        Color us = pos.side_to_move();
+        Undo undo;
+
+        for (const Move &m : pseudo)
         {
-            if (m.is_capture())
+            if (!m.is_capture())
+                continue;
+
+            pos.make_move(m, undo);
+            if (!is_square_attacked(pos, pos.king_square(us), ~us))
             {
                 moves.push_back(m);
             }
+            pos.unmake_move(m, undo);
         }
     }
 

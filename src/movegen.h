@@ -19,8 +19,8 @@ namespace pufferfish
     // Generate all legal moves (filtered for king safety)
     void generate_legal_moves(Position &pos, std::vector<Move> &moves);
 
-    // Generate only capture moves (for quiescence search later)
-    void generate_captures(const Position &pos, std::vector<Move> &moves);
+    // Generate only legal capture moves (for quiescence search)
+    void generate_captures(Position &pos, std::vector<Move> &moves);
 
 } // namespace pufferfish
 

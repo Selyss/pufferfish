@@ -295,6 +295,28 @@ void test_search_performance()
 }
 
 // =============================================================================
+// Quiescence search tests
+// =============================================================================
+
+void test_quiescence()
+{
+    std::cout << "\n"
+              << std::string(70, '=') << std::endl;
+    std::cout << "Quiescence Tests" << std::endl;
+    std::cout << std::string(70, '=') << std::endl;
+
+    Position pos;
+    Search search;
+
+    // Black queen is hanging on a5; white pawn can capture.
+    pos.set_fen("4k3/8/8/q7/1P6/8/8/4K3 w - - 0 1");
+    Move best = search.find_best_move(pos, 1);
+    test_case("Quiescence favors hanging queen capture at depth 1",
+              best.is_capture() && best.to() == SQ_A5,
+              "best=" + best.to_uci());
+}
+
+// =============================================================================
 // Mate-in-N search tests
 // =============================================================================
 
@@ -365,6 +387,7 @@ int main()
     test_move_validation();
     test_tt_integration();
     test_search_performance();
+    test_quiescence();
     test_mate_puzzles();
 
     print_summary();

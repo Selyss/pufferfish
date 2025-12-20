@@ -14,6 +14,47 @@
 
 namespace pufferfish
 {
+    namespace
+    {
+        int piece_value(PieceType pt)
+        {
+            switch (pt)
+            {
+            case PAWN:
+                return 100;
+            case KNIGHT:
+                return 320;
+            case BISHOP:
+                return 330;
+            case ROOK:
+                return 500;
+            case QUEEN:
+                return 900;
+            case KING:
+                return 20000;
+            default:
+                return 0;
+            }
+        }
+
+        int capture_mvv_lva(const Position &pos, const Move &m)
+        {
+            if (!m.is_capture())
+                return 0;
+
+            PieceType attacker = type_of(pos.piece_on(m.from()));
+            PieceType victim = PAWN;
+            if (m.flag() != MOVE_EN_PASSANT)
+            {
+                Piece captured = pos.piece_on(m.to());
+                if (captured != NO_PIECE)
+                {
+                    victim = type_of(captured);
+                }
+            }
+            return piece_value(victim) * 10 - piece_value(attacker);
+        }
+    }
 
     Search::Search(size_t tt_size_mb)
         : tt_(tt_size_mb), nnue_(std::make_unique<NNUEEvaluator>())
@@ -161,13 +202,30 @@ namespace pufferfish
 
         ++stats_.tt_probes;
 
-        // Terminal node: leaf evaluation
+        // Terminal node: quiescence search
         if (depth == 0)
         {
             ++stats_.leaf_nodes;
-            int score = evaluate(pos);
             stats_.max_depth = std::max(stats_.max_depth, 0);
-            return score;
+            return quiesce(pos, alpha, beta);
+        }
+
+        // Null-move pruning (skip in check, and only at reasonable depth).
+        if (depth >= 3 && !in_check(pos))
+        {
+            Undo null_undo;
+            pos.make_null_move(null_undo);
+            if (nnue_ && nnue_->is_ready())
+            {
+                nnue_->refresh_accumulator(pos);
+            }
+            int score = -alpha_beta(pos, depth - 1 - 2, -beta, -beta + 1);
+            pos.unmake_null_move(null_undo);
+
+            if (score >= beta)
+            {
+                return score;
+            }
         }
 
         // Generate legal moves
@@ -203,7 +261,7 @@ namespace pufferfish
                 return 1000000;
             int score = 0;
             if (m.is_capture())
-                score += 100000;
+                score += 100000 + capture_mvv_lva(pos, m);
             if (m.is_promotion())
                 score += 50000;
             if (m.is_castle())
@@ -287,7 +345,7 @@ namespace pufferfish
                 return 1000000;
             int score = 0;
             if (m.is_capture())
-                score += 100000;
+                score += 100000 + capture_mvv_lva(pos, m);
             if (m.is_promotion())
                 score += 50000;
             if (m.is_castle())
@@ -395,10 +453,42 @@ namespace pufferfish
     // For now, just return static evaluation.
     // Later: explore captures and checks to avoid horizon effect.
 
-    int Search::quiesce(Position &pos, int /* alpha */, int /* beta */)
+    int Search::quiesce(Position &pos, int alpha, int beta)
     {
-        // For now, simple evaluation
-        return evaluate(pos);
+        int stand_pat = evaluate(pos);
+        if (stand_pat >= beta)
+            return beta;
+        if (stand_pat > alpha)
+            alpha = stand_pat;
+
+        std::vector<Move> captures;
+        generate_captures(pos, captures);
+
+        auto capture_score = [&](const Move &m) -> int
+        { return 100000 + capture_mvv_lva(pos, m); };
+
+        std::stable_sort(captures.begin(), captures.end(),
+                         [&](const Move &a, const Move &b)
+                         { return capture_score(a) > capture_score(b); });
+
+        for (const Move &m : captures)
+        {
+            Undo undo;
+            pos.make_move(m, undo);
+            if (nnue_ && nnue_->is_ready())
+            {
+                nnue_->update_after_move(pos, m, undo);
+            }
+            int score = -quiesce(pos, -beta, -alpha);
+            pos.unmake_move(m, undo);
+
+            if (score >= beta)
+                return beta;
+            if (score > alpha)
+                alpha = score;
+        }
+
+        return alpha;
     }
 
 } // namespace pufferfish

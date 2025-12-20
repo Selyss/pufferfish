@@ -417,6 +417,46 @@ namespace pufferfish
     }
 
     // =============================================================================
+    // Null move (for search pruning)
+    // =============================================================================
+
+    void Position::make_null_move(Undo &undo)
+    {
+        undo.captured = NO_PIECE;
+        undo.captured_sq = SQ_NONE;
+        undo.castling = castling_;
+        undo.ep_square = ep_sq_;
+        undo.halfmove_clock = halfmove_clock_;
+        undo.king_sq[WHITE] = king_sq_[WHITE];
+        undo.king_sq[BLACK] = king_sq_[BLACK];
+        undo.nnue_features = nnue_features_;
+        undo.nnue_features_valid = nnue_features_valid_;
+
+        // Null move: side to move changes, en passant right is cleared.
+        ep_sq_ = SQ_NONE;
+        ++halfmove_clock_;
+        stm_ = ~stm_;
+
+        zobrist_key_ = compute_zobrist_key(*this);
+        nnue_features_valid_ = false;
+    }
+
+    void Position::unmake_null_move(const Undo &undo)
+    {
+        // Restore state
+        castling_ = undo.castling;
+        ep_sq_ = undo.ep_square;
+        halfmove_clock_ = undo.halfmove_clock;
+        king_sq_[WHITE] = undo.king_sq[WHITE];
+        king_sq_[BLACK] = undo.king_sq[BLACK];
+        nnue_features_ = undo.nnue_features;
+        nnue_features_valid_ = undo.nnue_features_valid;
+
+        stm_ = ~stm_;
+        zobrist_key_ = compute_zobrist_key(*this);
+    }
+
+    // =============================================================================
     // Display
     // =============================================================================
 
