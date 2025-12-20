@@ -68,7 +68,7 @@ namespace pufferfish
         mutable Scratch scratch_;
 
         // Feature encoding (matches dataset.FenFeatureEncoder)
-        void encode_features(const Position &pos, std::vector<float> &features) const;
+        void encode_features(const Position &pos, std::array<float, NNUE_FEATURE_DIM> &features) const;
 
         // Helpers
         static float relu(float x) { return x > 0.0f ? x : 0.0f; }

@@ -239,19 +239,20 @@ namespace pufferfish
         return (offset >= 0 && offset < 12) ? offset : -1;
     }
 
-    void NNUEEvaluator::encode_features(const Position &pos, std::vector<float> &features) const
+    void NNUEEvaluator::encode_features(const Position &pos,
+                                        std::array<float, NNUE_FEATURE_DIM> &features) const
     {
         const int base_dim = 768;
         const int extra_dim = 27;
         const int expected_dim = base_dim + extra_dim;
 
-        if (input_dim_ < expected_dim)
+        if (input_dim_ != expected_dim)
         {
-            features.assign(static_cast<size_t>(input_dim_), 0.0f);
+            features.fill(0.0f);
             return;
         }
 
-        features.assign(static_cast<size_t>(input_dim_), 0.0f);
+        features.fill(0.0f);
 
         for (Square sq = SQ_A1; sq <= SQ_H8; ++sq)
         {
@@ -395,7 +396,13 @@ namespace pufferfish
         if (!ready_ || layers_.empty())
             return 0;
 
-        encode_features(pos, scratch_.features);
+        if (!pos.nnue_features_valid_)
+        {
+            encode_features(pos, pos.nnue_features_);
+            pos.nnue_features_valid_ = true;
+        }
+
+        scratch_.features.assign(pos.nnue_features_.begin(), pos.nnue_features_.end());
         std::vector<float> *x = &scratch_.features;
         std::vector<float> *y = &scratch_.buf_a;
         std::vector<float> *z = &scratch_.buf_b;
@@ -474,14 +481,191 @@ namespace pufferfish
         return static_cast<int>(std::lround(score * 100.0f));
     }
 
-    void NNUEEvaluator::update_after_move(Position & /*pos*/, const Move & /*m*/, const Undo & /*undo*/) const
+    void NNUEEvaluator::update_after_move(Position &pos, const Move &m, const Undo &undo) const
     {
-        // No incremental accumulator for residual NNUE; evaluation recomputes features.
+        if (!ready_)
+            return;
+
+        if (!undo.nnue_features_valid || input_dim_ != NNUE_FEATURE_DIM)
+        {
+            encode_features(pos, pos.nnue_features_);
+            pos.nnue_features_valid_ = true;
+            return;
+        }
+
+        auto &features = pos.nnue_features_;
+
+        const int base_dim = 768;
+        const int side_idx = base_dim;
+        const int castling_idx = side_idx + 1;
+        const int ep_idx = castling_idx + 4;
+        const int material_idx = ep_idx + 8;
+        const int counts_idx = material_idx + 1;
+        const int phase_idx = counts_idx + 12;
+
+        Color us = ~pos.side_to_move();
+        Square from = m.from();
+        Square to = m.to();
+
+        Piece moving_piece = NO_PIECE;
+        if (m.is_promotion())
+        {
+            moving_piece = make_piece(us, PAWN);
+        }
+        else if (m.is_castle())
+        {
+            moving_piece = make_piece(us, KING);
+        }
+        else
+        {
+            moving_piece = pos.piece_on(to);
+        }
+
+        // Remove moving piece from origin square.
+        int off = piece_offset(moving_piece);
+        if (off >= 0)
+            features[static_cast<size_t>(off * 64 + from)] = 0.0f;
+
+        // Remove captured piece.
+        if (m.is_capture() && undo.captured != NO_PIECE)
+        {
+            int cap_off = piece_offset(undo.captured);
+            if (cap_off >= 0)
+                features[static_cast<size_t>(cap_off * 64 + undo.captured_sq)] = 0.0f;
+        }
+
+        // Add placed piece to destination square.
+        Piece placed_piece = moving_piece;
+        if (m.is_promotion())
+        {
+            placed_piece = make_piece(us, m.promotion_type());
+        }
+        int placed_off = piece_offset(placed_piece);
+        if (placed_off >= 0)
+            features[static_cast<size_t>(placed_off * 64 + to)] = 1.0f;
+
+        // Castling rook movement.
+        if (m.is_castle())
+        {
+            Square rook_from = SQ_NONE;
+            Square rook_to = SQ_NONE;
+            if (m.flag() == MOVE_CASTLE_K)
+            {
+                rook_from = (us == WHITE) ? SQ_H1 : SQ_H8;
+                rook_to = (us == WHITE) ? SQ_F1 : SQ_F8;
+            }
+            else
+            {
+                rook_from = (us == WHITE) ? SQ_A1 : SQ_A8;
+                rook_to = (us == WHITE) ? SQ_D1 : SQ_D8;
+            }
+            int rook_off = piece_offset(make_piece(us, ROOK));
+            if (rook_off >= 0)
+            {
+                features[static_cast<size_t>(rook_off * 64 + rook_from)] = 0.0f;
+                features[static_cast<size_t>(rook_off * 64 + rook_to)] = 1.0f;
+            }
+        }
+
+        // Side to move
+        features[static_cast<size_t>(side_idx)] = (pos.side_to_move() == WHITE) ? 1.0f : 0.0f;
+
+        // Castling rights
+        CastlingRights cr = pos.castling_rights();
+        features[static_cast<size_t>(castling_idx + 0)] = (cr & WHITE_OO) ? 1.0f : 0.0f;
+        features[static_cast<size_t>(castling_idx + 1)] = (cr & WHITE_OOO) ? 1.0f : 0.0f;
+        features[static_cast<size_t>(castling_idx + 2)] = (cr & BLACK_OO) ? 1.0f : 0.0f;
+        features[static_cast<size_t>(castling_idx + 3)] = (cr & BLACK_OOO) ? 1.0f : 0.0f;
+
+        // En passant file
+        for (int i = 0; i < 8; ++i)
+            features[static_cast<size_t>(ep_idx + i)] = 0.0f;
+        if (pos.ep_square() != SQ_NONE)
+        {
+            int file = file_of(pos.ep_square());
+            if (file >= 0 && file < 8)
+                features[static_cast<size_t>(ep_idx + file)] = 1.0f;
+        }
+
+        auto piece_type_index = [](PieceType pt) -> int {
+            return static_cast<int>(pt) - 1;
+        };
+        auto counts_index = [&](Color c, PieceType pt) -> size_t {
+            return static_cast<size_t>(counts_idx + (c == WHITE ? 0 : 6) + piece_type_index(pt));
+        };
+        auto apply_count_delta = [&](Piece p, int delta) {
+            PieceType pt = type_of(p);
+            if (pt == NO_PIECE_TYPE)
+                return;
+            Color c = color_of(p);
+            size_t idx = counts_index(c, pt);
+            features[idx] += static_cast<float>(delta) / 8.0f;
+        };
+        auto piece_value = [](PieceType pt) -> int {
+            switch (pt)
+            {
+            case PAWN:
+                return 100;
+            case KNIGHT:
+                return 320;
+            case BISHOP:
+                return 330;
+            case ROOK:
+                return 500;
+            case QUEEN:
+                return 900;
+            case KING:
+                return 0;
+            default:
+                return 0;
+            }
+        };
+
+        float material = features[static_cast<size_t>(material_idx)] * 2000.0f;
+
+        if (m.is_capture() && undo.captured != NO_PIECE)
+        {
+            PieceType pt = type_of(undo.captured);
+            Color c = color_of(undo.captured);
+            material -= static_cast<float>(piece_value(pt)) * (c == WHITE ? 1.0f : -1.0f);
+            apply_count_delta(undo.captured, -1);
+        }
+
+        if (m.is_promotion())
+        {
+            PieceType promo = m.promotion_type();
+            PieceType pawn = PAWN;
+            material += static_cast<float>(piece_value(promo) - piece_value(pawn)) *
+                        (us == WHITE ? 1.0f : -1.0f);
+            apply_count_delta(make_piece(us, PAWN), -1);
+            apply_count_delta(make_piece(us, promo), 1);
+        }
+
+        features[static_cast<size_t>(material_idx)] = material / 2000.0f;
+
+        int total_pieces = 0;
+        for (int i = 0; i < 12; ++i)
+        {
+            total_pieces += static_cast<int>(std::lround(features[static_cast<size_t>(counts_idx + i)] * 8.0f));
+        }
+        features[static_cast<size_t>(phase_idx)] = total_pieces / 32.0f;
+
+        pos.nnue_features_valid_ = true;
     }
 
-    void NNUEEvaluator::refresh_accumulator(Position & /*pos*/) const
+    void NNUEEvaluator::refresh_accumulator(Position &pos) const
     {
-        // No-op for residual NNUE.
+        if (!ready_)
+            return;
+        if (input_dim_ != NNUE_FEATURE_DIM)
+        {
+            pos.nnue_features_.fill(0.0f);
+            pos.nnue_features_valid_ = false;
+            return;
+        }
+
+        encode_features(pos, pos.nnue_features_);
+        pos.nnue_features_valid_ = true;
     }
 
 } // namespace pufferfish

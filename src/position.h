@@ -107,9 +107,8 @@ namespace pufferfish
         int fullmove_;            // Fullmove number
         Square king_sq_[2];       // King squares indexed by color
         uint64_t zobrist_key_;    // Zobrist hash of the position
-        std::array<int32_t, NNUE_ACC_UNITS> nnue_acc_friendly_;
-        std::array<int32_t, NNUE_ACC_UNITS> nnue_acc_enemy_;
-        bool nnue_acc_valid_;
+        std::array<float, NNUE_FEATURE_DIM> nnue_features_;
+        bool nnue_features_valid_;
     };
 
     // Convenience output operator

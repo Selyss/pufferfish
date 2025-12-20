@@ -8,10 +8,8 @@
 
 namespace pufferfish
 {
-    constexpr int NNUE_FEATURE_DIM = 768;
-    constexpr int NNUE_ACC_UNITS = 256;
-    constexpr int NNUE_HIDDEN1 = 32;
-    constexpr int NNUE_HIDDEN2 = 32;
+    // Feature dimension for the compact residual NNUE encoder.
+    constexpr int NNUE_FEATURE_DIM = 795;
 } // namespace pufferfish
 
 #endif // PUFFERFISH_NNUE_DEFS_H

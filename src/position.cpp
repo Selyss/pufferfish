@@ -33,9 +33,8 @@ namespace pufferfish
         king_sq_[WHITE] = SQ_NONE;
         king_sq_[BLACK] = SQ_NONE;
         zobrist_key_ = 0;
-        nnue_acc_friendly_.fill(0);
-        nnue_acc_enemy_.fill(0);
-        nnue_acc_valid_ = false;
+        nnue_features_.fill(0.0f);
+        nnue_features_valid_ = false;
     }
 
     void Position::reset()
@@ -149,7 +148,7 @@ namespace pufferfish
 
         bool valid = is_valid();
         zobrist_key_ = compute_zobrist_key(*this);
-        nnue_acc_valid_ = false;
+        nnue_features_valid_ = false;
         return valid;
     }
 
@@ -254,9 +253,8 @@ namespace pufferfish
         undo.halfmove_clock = halfmove_clock_;
         undo.king_sq[WHITE] = king_sq_[WHITE];
         undo.king_sq[BLACK] = king_sq_[BLACK];
-        undo.nnue_acc_friendly = nnue_acc_friendly_;
-        undo.nnue_acc_enemy = nnue_acc_enemy_;
-        undo.nnue_acc_valid = nnue_acc_valid_;
+        undo.nnue_features = nnue_features_;
+        undo.nnue_features_valid = nnue_features_valid_;
 
         Square from = m.from();
         Square to = m.to();
@@ -348,8 +346,8 @@ namespace pufferfish
         // Switch side to move and update Zobrist key
         stm_ = ~stm_;
         zobrist_key_ = compute_zobrist_key(*this);
-        // NNUE accumulator updated by evaluator; invalidate after mutation
-        nnue_acc_valid_ = false;
+        // NNUE features updated by evaluator; invalidate after mutation
+        nnue_features_valid_ = false;
     }
 
     void Position::unmake_move(const Move &m, const Undo &undo)
@@ -414,9 +412,8 @@ namespace pufferfish
 
         // Recompute Zobrist key
         zobrist_key_ = compute_zobrist_key(*this);
-        nnue_acc_friendly_ = undo.nnue_acc_friendly;
-        nnue_acc_enemy_ = undo.nnue_acc_enemy;
-        nnue_acc_valid_ = undo.nnue_acc_valid;
+        nnue_features_ = undo.nnue_features;
+        nnue_features_valid_ = undo.nnue_features_valid;
     }
 
     // =============================================================================
