@@ -176,6 +176,12 @@ namespace pufferfish
 
     int Search::alpha_beta(Position &pos, int depth, int alpha, int beta)
     {
+        if (time_limit_ms_ > 0 && timer_.time_exceeded(time_limit_ms_))
+        {
+            time_stop_ = true;
+            return evaluate(pos);
+        }
+
         ++stats_.nodes_searched;
 
         // Transposition table lookup
@@ -276,6 +282,9 @@ namespace pufferfish
         // Try each move
         for (const Move &m : moves)
         {
+            if (time_stop_)
+                break;
+
             Undo undo;
             pos.make_move(m, undo);
             if (nnue_ && nnue_->is_ready())
@@ -284,6 +293,8 @@ namespace pufferfish
             }
             int score = -alpha_beta(pos, depth - 1, -beta, -alpha);
             pos.unmake_move(m, undo);
+            if (time_stop_)
+                break;
 
             if (score > best_score)
             {
@@ -318,11 +329,19 @@ namespace pufferfish
 
     Move Search::find_best_move(Position &pos, int depth)
     {
+        time_limit_ms_ = 0;
+        time_stop_ = false;
+        return find_best_move_internal(pos, depth);
+    }
+
+    Move Search::find_best_move_internal(Position &pos, int depth)
+    {
         if (depth < 1)
             return Move();
 
         stats_.reset();
         tt_.clear();
+        time_stop_ = false;
         if (nnue_ && nnue_->is_ready())
         {
             nnue_->refresh_accumulator(pos);
@@ -362,6 +381,9 @@ namespace pufferfish
 
         for (const Move &m : moves)
         {
+            if (time_stop_)
+                break;
+
             Undo undo;
             pos.make_move(m, undo);
             if (nnue_ && nnue_->is_ready())
@@ -370,6 +392,8 @@ namespace pufferfish
             }
             int score = -alpha_beta(pos, depth - 1, -INF, INF);
             pos.unmake_move(m, undo);
+            if (time_stop_)
+                break;
 
             if (score > best_score)
             {
@@ -389,6 +413,8 @@ namespace pufferfish
     {
         timer_.reset();
         uint64_t time_limit = time_mgr.get_time_budget();
+        time_limit_ms_ = time_limit;
+        time_stop_ = false;
         Move best_move;
         if (nnue_ && nnue_->is_ready())
         {
@@ -409,12 +435,14 @@ namespace pufferfish
                 break; // Return result from previous depth
 
             // Search at this depth
-            Move move_at_depth = find_best_move(pos, depth);
+            Move move_at_depth = find_best_move_internal(pos, depth);
 
             if (move_at_depth == Move())
                 break; // No legal moves
 
             best_move = move_at_depth;
+            if (time_stop_)
+                break;
 
             // Output UCI info for this depth
             uint64_t elapsed = timer_.elapsed_ms();
@@ -455,6 +483,12 @@ namespace pufferfish
 
     int Search::quiesce(Position &pos, int alpha, int beta)
     {
+        if (time_limit_ms_ > 0 && timer_.time_exceeded(time_limit_ms_))
+        {
+            time_stop_ = true;
+            return evaluate(pos);
+        }
+
         int stand_pat = evaluate(pos);
         if (stand_pat >= beta)
             return beta;
@@ -473,6 +507,9 @@ namespace pufferfish
 
         for (const Move &m : captures)
         {
+            if (time_stop_)
+                break;
+
             Undo undo;
             pos.make_move(m, undo);
             if (nnue_ && nnue_->is_ready())
@@ -481,6 +518,8 @@ namespace pufferfish
             }
             int score = -quiesce(pos, -beta, -alpha);
             pos.unmake_move(m, undo);
+            if (time_stop_)
+                break;
 
             if (score >= beta)
                 return beta;

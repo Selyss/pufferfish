@@ -114,6 +114,10 @@ namespace pufferfish
         int nodes_at_depth_ = 0;
         Timer timer_;                         // For time management
         std::unique_ptr<NNUEEvaluator> nnue_; // Neural network evaluator
+        uint64_t time_limit_ms_ = 0;
+        bool time_stop_ = false;
+
+        Move find_best_move_internal(Position &pos, int depth);
 
         // Quiet search for tactical positions (future optimization)
         int quiesce(Position &pos, int alpha, int beta);
