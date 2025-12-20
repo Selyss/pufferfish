@@ -395,8 +395,10 @@ namespace pufferfish
         if (!ready_ || layers_.empty())
             return 0;
 
-        std::vector<float> x;
-        encode_features(pos, x);
+        encode_features(pos, scratch_.features);
+        std::vector<float> *x = &scratch_.features;
+        std::vector<float> *y = &scratch_.buf_a;
+        std::vector<float> *z = &scratch_.buf_b;
 
         for (size_t li = 0; li < layers_.size(); ++li)
         {
@@ -404,64 +406,68 @@ namespace pufferfish
 
             if (layer.type == LAYER_LINEAR)
             {
-                std::vector<float> out(static_cast<size_t>(layer.out));
+                y->assign(static_cast<size_t>(layer.out), 0.0f);
                 const int in = layer.in;
                 for (int i = 0; i < layer.out; ++i)
                 {
                     const float *row = layer.weights.data() + static_cast<size_t>(i) * in;
-                    out[static_cast<size_t>(i)] = layer.bias[static_cast<size_t>(i)] + dot_row(row, x, in);
+                    (*y)[static_cast<size_t>(i)] =
+                        layer.bias[static_cast<size_t>(i)] + dot_row(row, *x, in);
                 }
 
                 const bool is_output = (li + 1 == layers_.size());
                 if (!is_output)
                 {
-                    for (float &v : out)
+                    for (float &v : *y)
                         v = relu(v);
                 }
-                x = std::move(out);
+                std::swap(x, y);
             }
             else if (layer.type == LAYER_LAYERNORM)
             {
-                layernorm(x, layer.weights, layer.bias, layer.eps);
+                layernorm(*x, layer.weights, layer.bias, layer.eps);
             }
             else if (layer.type == LAYER_RESIDUAL || layer.type == LAYER_COMPACT_RESIDUAL)
             {
                 const int dim = layer.dim;
-                std::vector<float> y(static_cast<size_t>(dim));
+                y->assign(static_cast<size_t>(dim), 0.0f);
 
                 for (int i = 0; i < dim; ++i)
                 {
                     const float *row = layer.w1.data() + static_cast<size_t>(i) * dim;
-                    y[static_cast<size_t>(i)] = layer.b1[static_cast<size_t>(i)] + dot_row(row, x, dim);
-                    y[static_cast<size_t>(i)] = relu(y[static_cast<size_t>(i)]);
+                    (*y)[static_cast<size_t>(i)] =
+                        layer.b1[static_cast<size_t>(i)] + dot_row(row, *x, dim);
+                    (*y)[static_cast<size_t>(i)] = relu((*y)[static_cast<size_t>(i)]);
                 }
 
-                std::vector<float> z(static_cast<size_t>(dim));
+                z->assign(static_cast<size_t>(dim), 0.0f);
                 for (int i = 0; i < dim; ++i)
                 {
                     const float *row = layer.w2.data() + static_cast<size_t>(i) * dim;
-                    z[static_cast<size_t>(i)] = layer.b2[static_cast<size_t>(i)] + dot_row(row, y, dim);
+                    (*z)[static_cast<size_t>(i)] =
+                        layer.b2[static_cast<size_t>(i)] + dot_row(row, *y, dim);
                 }
 
                 for (int i = 0; i < dim; ++i)
-                    z[static_cast<size_t>(i)] = x[static_cast<size_t>(i)] + z[static_cast<size_t>(i)];
+                    (*z)[static_cast<size_t>(i)] =
+                        (*x)[static_cast<size_t>(i)] + (*z)[static_cast<size_t>(i)];
 
                 if (layer.type == LAYER_RESIDUAL && layer.has_norm)
                 {
-                    layernorm(z, layer.norm_w, layer.norm_b, layer.eps);
+                    layernorm(*z, layer.norm_w, layer.norm_b, layer.eps);
                 }
 
-                for (float &v : z)
+                for (float &v : *z)
                     v = relu(v);
 
-                x = std::move(z);
+                std::swap(x, z);
             }
         }
 
-        if (x.empty())
+        if (x->empty())
             return 0;
 
-        float score = x[0];
+        float score = (*x)[0];
         if (pos.side_to_move() == BLACK)
             score = -score;
 

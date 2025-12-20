@@ -58,6 +58,15 @@ namespace pufferfish
         int input_dim_ = 0;
         std::vector<Layer> layers_;
 
+        struct Scratch
+        {
+            std::vector<float> features;
+            std::vector<float> buf_a;
+            std::vector<float> buf_b;
+            std::vector<float> tmp;
+        };
+        mutable Scratch scratch_;
+
         // Feature encoding (matches dataset.FenFeatureEncoder)
         void encode_features(const Position &pos, std::vector<float> &features) const;
 
@@ -72,4 +81,3 @@ namespace pufferfish
 } // namespace pufferfish
 
 #endif // PUFFERFISH_NNUE_H
-
