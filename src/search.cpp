@@ -291,7 +291,8 @@ namespace pufferfish
                          [&](const Move &a, const Move &b)
                          { return move_score(a) > move_score(b); });
 
-        // Try each move
+        // Try each move (PVS for non-first moves)
+        bool first_move = true;
         for (const Move &m : moves)
         {
             if (time_stop_)
@@ -303,7 +304,19 @@ namespace pufferfish
             {
                 nnue_->update_after_move(pos, m, undo);
             }
-            int score = -alpha_beta(pos, depth - 1, -beta, -alpha, ply + 1);
+            int score;
+            if (first_move)
+            {
+                score = -alpha_beta(pos, depth - 1, -beta, -alpha, ply + 1);
+            }
+            else
+            {
+                score = -alpha_beta(pos, depth - 1, -alpha - 1, -alpha, ply + 1);
+                if (score > alpha && score < beta)
+                {
+                    score = -alpha_beta(pos, depth - 1, -beta, -alpha, ply + 1);
+                }
+            }
             pos.unmake_move(m, undo);
             if (time_stop_)
                 break;
@@ -335,6 +348,7 @@ namespace pufferfish
                     }
                 }
             }
+            first_move = false;
         }
 
         // Store in transposition table
