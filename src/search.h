@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <vector>
 #include <memory>
+#include <array>
 
 namespace pufferfish
 {
@@ -87,7 +88,7 @@ namespace pufferfish
         Move find_best_move_iterative(Position &pos, const SearchTimeManager &time_mgr);
 
         // Alpha-beta search (internal)
-        int alpha_beta(Position &pos, int depth, int alpha, int beta);
+        int alpha_beta(Position &pos, int depth, int alpha, int beta, int ply);
 
         // Simple evaluation function (uses NNUE if available)
         int evaluate(Position &pos);
@@ -112,6 +113,7 @@ namespace pufferfish
         bool use_nnue() const { return use_nnue_; }
 
     private:
+        static constexpr int MAX_PLY = 256;
         TranspositionTable tt_;
         SearchStats stats_;
         int nodes_at_depth_ = 0;
@@ -122,6 +124,8 @@ namespace pufferfish
         bool use_nnue_ = true;
 
         Move find_best_move_internal(Position &pos, int depth);
+        std::array<std::array<Move, 2>, MAX_PLY> killers_{};
+        std::array<std::array<std::array<int, 64>, 64>, 2> history_{};
 
         // Quiet search for tactical positions (future optimization)
         int quiesce(Position &pos, int alpha, int beta);

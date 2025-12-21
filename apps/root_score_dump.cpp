@@ -81,7 +81,7 @@ int main(int argc, char **argv)
     {
         Undo undo;
         pos.make_move(m, undo);
-        int score = -search.alpha_beta(pos, depth - 1, -INF, INF);
+        int score = -search.alpha_beta(pos, depth - 1, -INF, INF, 1);
         pos.unmake_move(m, undo);
         scored.push_back({m, score});
     }
@@ -110,4 +110,3 @@ int main(int argc, char **argv)
 
     return 0;
 }
-

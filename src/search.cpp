@@ -174,7 +174,7 @@ namespace pufferfish
     // Alpha-Beta Search
     // =============================================================================
 
-    int Search::alpha_beta(Position &pos, int depth, int alpha, int beta)
+    int Search::alpha_beta(Position &pos, int depth, int alpha, int beta, int ply)
     {
         if (time_limit_ms_ > 0 && timer_.time_exceeded(time_limit_ms_))
         {
@@ -225,7 +225,7 @@ namespace pufferfish
             {
                 nnue_->refresh_accumulator(pos);
             }
-            int score = -alpha_beta(pos, depth - 1 - 2, -beta, -beta + 1);
+            int score = -alpha_beta(pos, depth - 1 - 2, -beta, -beta + 1, ply + 1);
             pos.unmake_null_move(null_undo);
 
             if (score >= beta)
@@ -260,6 +260,7 @@ namespace pufferfish
         int best_score = NEG_INF;
         Move best_move;
         BoundType bound_type = BOUND_UPPER;
+        Color us = pos.side_to_move();
 
         // Move ordering: TT move first, then captures/promotions.
         auto move_score = [&](const Move &m) -> int {
@@ -272,6 +273,17 @@ namespace pufferfish
                 score += 50000;
             if (m.is_castle())
                 score += 1000;
+            if (!m.is_capture() && !m.is_promotion())
+            {
+                if (ply < MAX_PLY)
+                {
+                    if (m == killers_[ply][0])
+                        score += 900;
+                    else if (m == killers_[ply][1])
+                        score += 800;
+                }
+                score += history_[us][m.from()][m.to()];
+            }
             return score;
         };
 
@@ -291,7 +303,7 @@ namespace pufferfish
             {
                 nnue_->update_after_move(pos, m, undo);
             }
-            int score = -alpha_beta(pos, depth - 1, -beta, -alpha);
+            int score = -alpha_beta(pos, depth - 1, -beta, -alpha, ply + 1);
             pos.unmake_move(m, undo);
             if (time_stop_)
                 break;
@@ -310,6 +322,15 @@ namespace pufferfish
                     {
                         ++stats_.beta_cutoffs;
                         bound_type = BOUND_LOWER;
+                        if (!m.is_capture() && !m.is_promotion() && ply < MAX_PLY)
+                        {
+                            if (killers_[ply][0] != m)
+                            {
+                                killers_[ply][1] = killers_[ply][0];
+                                killers_[ply][0] = m;
+                            }
+                            history_[us][m.from()][m.to()] += depth * depth;
+                        }
                         break; // Beta cutoff
                     }
                 }
@@ -358,6 +379,7 @@ namespace pufferfish
         Move tt_move;
         if (const TTEntry *tt_entry = tt_.lookup(pos.zobrist_key(), depth))
             tt_move = tt_entry->best_move;
+        Color us = pos.side_to_move();
 
         auto move_score = [&](const Move &m) -> int {
             if (!tt_move.is_none() && m == tt_move)
@@ -369,6 +391,14 @@ namespace pufferfish
                 score += 50000;
             if (m.is_castle())
                 score += 1000;
+            if (!m.is_capture() && !m.is_promotion())
+            {
+                if (m == killers_[0][0])
+                    score += 900;
+                else if (m == killers_[0][1])
+                    score += 800;
+                score += history_[us][m.from()][m.to()];
+            }
             return score;
         };
 
@@ -390,7 +420,7 @@ namespace pufferfish
             {
                 nnue_->update_after_move(pos, m, undo);
             }
-            int score = -alpha_beta(pos, depth - 1, -INF, INF);
+            int score = -alpha_beta(pos, depth - 1, -INF, INF, 1);
             pos.unmake_move(m, undo);
             if (time_stop_)
                 break;
@@ -473,6 +503,18 @@ namespace pufferfish
         tt_.clear();
         stats_.reset();
         timer_.reset();
+        for (auto &row : killers_)
+        {
+            row[0] = MOVE_NULL;
+            row[1] = MOVE_NULL;
+        }
+        for (auto &color_table : history_)
+        {
+            for (auto &from_table : color_table)
+            {
+                from_table.fill(0);
+            }
+        }
     }
 
     // =============================================================================
