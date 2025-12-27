@@ -6,6 +6,9 @@ Run with: modal run train_modal.py
 
 import modal
 
+from config import FEATURE_DIM
+from model import NNUEModel
+
 # Create Modal app
 app = modal.App("pufferfish-nnue-training")
 
@@ -49,7 +52,7 @@ def preprocess_features():
         features_list = []
         for fen in fens:
             board = chess.Board(fen)
-            features = torch.zeros(768, dtype=torch.float32)
+            features = torch.zeros(FEATURE_DIM, dtype=torch.float32)
             
             piece_to_idx = {
                 chess.PAWN: 0,
@@ -140,45 +143,10 @@ def train_on_modal(
     import chess
     from datasets import load_dataset
     
-    # Configuration constants
-    FEATURE_DIM = 768
-    ACC_UNITS = 256
-    HIDDEN1 = 32
-    HIDDEN2 = 32
-    
-    # Define the model inline
-    class NNUEModel(nn.Module):
-        def __init__(self):
-            super().__init__()
-            input_dim = FEATURE_DIM
-            
-            # Accumulator projections
-            self.acc_friendly = nn.Linear(input_dim, ACC_UNITS)
-            self.acc_enemy = nn.Linear(input_dim, ACC_UNITS)
-            
-            # Fully connected part
-            self.fc1 = nn.Linear(2 * ACC_UNITS, HIDDEN1)
-            self.fc2 = nn.Linear(HIDDEN1, HIDDEN2)
-            self.fc_out = nn.Linear(HIDDEN2, 1)
-        
-        def forward(self, x):
-            acc_f = self.acc_friendly(x)
-            acc_e = self.acc_enemy(x)
-            
-            acc_f = torch.relu(acc_f)
-            acc_e = torch.relu(acc_e)
-            
-            combined = torch.cat([acc_f, acc_e], dim=1)
-            
-            y = torch.relu(self.fc1(combined))
-            y = torch.relu(self.fc2(y))
-            y = self.fc_out(y)
-            return y
-    
     def fen_to_features(fen: str) -> torch.Tensor:
         """Convert FEN to feature vector."""
         board = chess.Board(fen)
-        features = torch.zeros(768, dtype=torch.float32)
+        features = torch.zeros(FEATURE_DIM, dtype=torch.float32)
         
         piece_to_idx = {
             chess.PAWN: 0,

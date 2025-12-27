@@ -39,6 +39,9 @@ def export_quantized(pt_path: str, bin_path: str):
             print(f"  Checkpoint from epoch {state['epoch'] + 1}")
         if 'val_loss' in state:
             print(f"  Validation loss: {state['val_loss']:.4f}")
+    elif isinstance(state, dict) and 'model_state' in state:
+        print("Detected model_state wrapper, extracting model_state...")
+        model.load_state_dict(state['model_state'])
     else:
         model.load_state_dict(state)
     
